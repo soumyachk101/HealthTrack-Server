@@ -17,3 +17,6 @@ application = get_wsgi_application()
 
 # Vercel requires the variable to be named 'app'
 app = application
+
+# Vercel handler function
+handler = app
