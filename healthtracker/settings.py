@@ -110,9 +110,14 @@ DATABASES = {
 }
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
+
 if DATABASE_URL:
     import dj_database_url
     DATABASES['default'] = dj_database_url.config(default=DATABASE_URL, conn_max_age=600)
+elif not DEBUG:
+    # In production (DEBUG=False), we MUST have a DATABASE_URL.
+    # Fallback to SQLite is not allowed because the filesystem is read-only on Vercel.
+    raise ValueError("DATABASE_URL environment variable is missing in production! Please add it to your Vercel project settings.")
 elif os.environ.get('DB_NAME'):
     DATABASES['default'] = {
         'ENGINE': 'django.db.backends.mysql',
