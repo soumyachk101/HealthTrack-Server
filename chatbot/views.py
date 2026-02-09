@@ -11,37 +11,25 @@ import os
 logger = logging.getLogger(__name__)
 
 @csrf_exempt
-@require_http_methods(["POST", "OPTIONS"])
+@require_http_methods(["POST"])
 def chat_api(request):
-    # Handle CORS preflight requests
-    if request.method == 'OPTIONS':
-        response = JsonResponse({})
-        response['Access-Control-Allow-Origin'] = '*'
-        response['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response['Access-Control-Allow-Headers'] = 'Content-Type'
-        return response
-    
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            user_message = data.get('message', '')
+    try:
+        data = json.loads(request.body)
+        user_message = data.get('message', '')
 
-            if not user_message:
-                response = JsonResponse({'error': 'No message provided'}, status=400)
-                response['Access-Control-Allow-Origin'] = '*'
-                return response
+        if not user_message:
+            return JsonResponse({'error': 'No message provided'}, status=400)
 
-            api_key = settings.OPENAI_API_KEY or os.environ.get('OPENAI_API_KEY')
-            
-            if not api_key:
-                # Try fallback to GOOGLE_API_KEY if the user put the OR key there
-                legacy_key = settings.GOOGLE_API_KEY or os.environ.get('GOOGLE_API_KEY')
-                if legacy_key and legacy_key.startswith('sk-or-v1'):
-                    api_key = legacy_key
-                else:
-                    response = JsonResponse({'error': 'Server configuration error: API key missing'}, status=503)
-                    response['Access-Control-Allow-Origin'] = '*'
-                    return response
+        api_key = getattr(settings, 'OPENAI_API_KEY', None) or os.environ.get('OPENAI_API_KEY')
+        
+        if not api_key:
+            # Try fallback to GOOGLE_API_KEY if the user put the OR key there
+            legacy_key = getattr(settings, 'GOOGLE_API_KEY', None) or os.environ.get('GOOGLE_API_KEY')
+            if legacy_key and legacy_key.startswith('sk-or-v1'):
+                api_key = legacy_key
+            else:
+                logger.error("OpenAI API Key is missing.")
+                return JsonResponse({'error': 'Server configuration error: API key missing'}, status=503)
 
             # Initialize OpenAI client with OpenRouter base URL
             client = OpenAI(
@@ -98,24 +86,14 @@ def chat_api(request):
 
             response_text = completion.choices[0].message.content
             
-            response = JsonResponse({'response': response_text})
-            response['Access-Control-Allow-Origin'] = '*'
-            return response
+            return JsonResponse({'response': response_text})
 
         except json.JSONDecodeError:
             logger.error("Invalid JSON in request body")
-            response = JsonResponse({'error': 'Invalid JSON format'}, status=400)
-            response['Access-Control-Allow-Origin'] = '*'
-            return response
+            return JsonResponse({'error': 'Invalid JSON format'}, status=400)
         except Exception as e:
             logger.error(f"Error in chat_api: {str(e)}", exc_info=True)
             error_message = 'An error occurred while processing your request. Please try again.'
             if settings.DEBUG:
                 error_message = f'An error occurred: {str(e)}'
-            response = JsonResponse({'error': error_message}, status=500)
-            response['Access-Control-Allow-Origin'] = '*'
-            return response
-
-    response = JsonResponse({'error': 'Invalid request method'}, status=405)
-    response['Access-Control-Allow-Origin'] = '*'
-    return response
+            return JsonResponse({'error': error_message}, status=500)
