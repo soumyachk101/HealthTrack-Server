@@ -21,6 +21,22 @@
     },
     {
       "src": "/(.*)",
+      "methods": ["OPTIONS"],
+      "headers": {
+        "Access-Control-Allow-Origin": "https://healthtrack101.netlify.app",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-CSRFToken, X-Requested-With",
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Max-Age": "86400"
+      },
+      "dest": "healthtracker/wsgi.py"
+    },
+    {
+      "src": "/(.*)",
+      "headers": {
+        "Access-Control-Allow-Origin": "https://healthtrack101.netlify.app",
+        "Access-Control-Allow-Credentials": "true"
+      },
       "dest": "healthtracker/wsgi.py"
     }
   ]
