@@ -1,15 +1,18 @@
 from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
 from django.db.models import Avg
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 from django.utils.timesince import timesince
+
+from accounts.api_views import jwt_required
 
 from .models import (
     HealthRecord, Medicine, Prescription, MentalHealthLog,
     InsurancePolicy, LifestyleLog, ActivityLog
 )
 
-@login_required
+@csrf_exempt
+@jwt_required
 @require_GET
 def dashboard_api(request):
     """
