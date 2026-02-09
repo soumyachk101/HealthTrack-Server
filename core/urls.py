@@ -1,8 +1,11 @@
 from django.urls import path
+from django.urls import path
 from . import views
+from . import api_views
 
 urlpatterns = [
     path('', views.home, name='home'),
+    path('api/dashboard/', api_views.dashboard_api, name='dashboard_api'),
     path('dashboard/', views.dashboard, name='dashboard'),
     path('provider-dashboard/', views.provider_dashboard, name='provider_dashboard'),
     path('medicines/', views.medicines, name='medicines'),
