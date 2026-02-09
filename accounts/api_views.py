@@ -9,7 +9,7 @@ from django.contrib.auth import get_user_model
 from .models import ServiceProvider
 from core.models import ActivityLog
 
-User = get_user_model()
+# User = get_user_model() # Moved inside functions to avoid AppRegistryNotReady
 
 # Secret key for JWT encoding (use Django's SECRET_KEY)
 JWT_SECRET = settings.SECRET_KEY
@@ -75,6 +75,7 @@ def register_api(request):
             first_name = data.get('first_name')
             last_name = data.get('last_name')
             
+            User = get_user_model()
             if User.objects.filter(username=username).exists():
                 return JsonResponse({'success': False, 'error': 'Username already exists'}, status=400)
             
