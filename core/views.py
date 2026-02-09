@@ -1,4 +1,5 @@
 from django.shortcuts import render, redirect
+from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db.models import Avg
@@ -19,7 +20,11 @@ def home(request):
         elif request.user.user_type == 'provider':
             return redirect('provider_dashboard')
         return redirect('dashboard')
-    return render(request, 'core/home.html')
+    return JsonResponse({
+        "status": "success",
+        "message": "HealthTrack Backend is running successfully.",
+        "version": "1.0.0"
+    })
 
 @login_required
 def provider_dashboard(request):
