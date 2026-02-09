@@ -3,7 +3,8 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.conf import settings
-from openai import OpenAI
+from django.conf import settings
+# from openai import OpenAI # Moved inside view to prevent startup errors if missing
 import json
 import logging
 import os
@@ -32,6 +33,12 @@ def chat_api(request):
                 return JsonResponse({'error': 'Server configuration error: API key missing'}, status=503)
 
             # Initialize OpenAI client with OpenRouter base URL
+            try:
+                from openai import OpenAI
+            except ImportError:
+                logger.error("OpenAI module not found. Check requirements.txt")
+                return JsonResponse({'error': 'Server configuration error: OpenAI module missing'}, status=503)
+
             client = OpenAI(
                 api_key=api_key,
                 base_url="https://openrouter.ai/api/v1",
