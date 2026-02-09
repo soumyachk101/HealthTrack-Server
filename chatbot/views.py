@@ -95,12 +95,12 @@ def chat_api(request):
             
             return JsonResponse({'response': response_text})
 
-        except json.JSONDecodeError:
-            logger.error("Invalid JSON in request body")
-            return JsonResponse({'error': 'Invalid JSON format'}, status=400)
-        except Exception as e:
-            logger.error(f"Error in chat_api: {str(e)}", exc_info=True)
-            error_message = 'An error occurred while processing your request. Please try again.'
-            if settings.DEBUG:
-                error_message = f'An error occurred: {str(e)}'
-            return JsonResponse({'error': error_message}, status=500)
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON in request body")
+        return JsonResponse({'error': 'Invalid JSON format'}, status=400)
+    except Exception as e:
+        logger.error(f"Error in chat_api: {str(e)}", exc_info=True)
+        error_message = 'An error occurred while processing your request. Please try again.'
+        if settings.DEBUG:
+            error_message = f'An error occurred: {str(e)}'
+        return JsonResponse({'error': error_message}, status=500)
