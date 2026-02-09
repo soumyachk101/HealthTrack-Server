@@ -5,9 +5,11 @@ from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import authenticate, login
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from .models import ServiceProvider
 from core.models import ActivityLog
+
+User = get_user_model()
 
 # Secret key for JWT encoding (use Django's SECRET_KEY)
 JWT_SECRET = settings.SECRET_KEY
