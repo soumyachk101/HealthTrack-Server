@@ -158,9 +158,12 @@ LOGIN_URL = '/accounts/login/'
 LOGIN_REDIRECT_URL = '/dashboard/'
 LOGOUT_REDIRECT_URL = '/'
 
-CORS_ALLOWED_ORIGINS = os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173,https://healthtrack101.netlify.app,https://healthtrack111.netlify.app').split(',')
+CORS_ALLOWED_ORIGINS = os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173,https://healthtrack111.netlify.app,https://*.vercel.app').split(',')
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = DEBUG
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    CORS_ALLOW_ALL_ORIGINS = False  # Explicitly set to False in production
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -182,6 +185,14 @@ CORS_ALLOW_METHODS = [
 ]
 
 CSRF_TRUSTED_ORIGINS = os.environ.get('CSRF_TRUSTED_ORIGINS', 'https://*.replit.dev,https://*.repl.co,https://*.vercel.app,https://*.netlify.app').split(',')
+
+# CSRF and Session settings for production
+CSRF_COOKIE_HTTPONLY = False  # Need to be accessible by JavaScript for frontend
+CSRF_COOKIE_SECURE = not DEBUG  # Only secure in production
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SECURE = not DEBUG  # Only secure in production
+SESSION_COOKIE_SAMESITE = 'Lax'  # Important for cross-origin requests
 
 JAZZMIN_SETTINGS = {
     "site_title": "HealthTrack+ Admin",
