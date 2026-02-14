@@ -101,14 +101,9 @@ def register_api(request):
             if User.objects.filter(email=email).exists():
                 return JsonResponse({'success': False, 'error': 'Email already registered'}, status=400)
             
-            # Store registration data in temporary storage (we'll use a dictionary as a simple cache)
-            import uuid
-            temp_id = str(uuid.uuid4())
-            # In a real serverless environment, we'd use a cache like Redis
-            # For now, we'll store in a simple in-memory dict (not suitable for production serverless)
-            if not hasattr(register_api, 'temp_storage'):
-                register_api.temp_storage = {}
-            register_api.temp_storage[temp_id] = data
+            # Store registration data in session (works in serverless environments)
+            # Session data is persisted in the database, so it survives across function invocations
+            request.session['pending_registration'] = data
             
             # Generate OTP using the model
             otp_record = OTP.create_otp(email, 'register')
@@ -116,9 +111,6 @@ def register_api(request):
             
             # Send OTP email
             send_otp_email(email, otp, data.get('first_name'))
-            
-            # Store temp_id in session or return it to frontend to use later
-            request.session['temp_reg_id'] = temp_id
             
             return JsonResponse({
                 'success': True,
@@ -147,15 +139,13 @@ def verify_otp_api(request):
             User = get_user_model()
             
             if otp_type == 'register':
-                # Get registration data from our temporary storage
-                temp_id = request.session.get('temp_reg_id')
-                if not temp_id or not hasattr(register_api, 'temp_storage') or temp_id not in register_api.temp_storage:
+                # Get registration data from session
+                reg_data = request.session.get('pending_registration')
+                if not reg_data:
                     return JsonResponse({'success': False, 'error': 'Registration session expired'}, status=400)
                 
-                reg_data = register_api.temp_storage[temp_id]
-                # Clean up temporary storage
-                del register_api.temp_storage[temp_id]
-                request.session.pop('temp_reg_id', None)
+                # Clean up session data
+                request.session.pop('pending_registration', None)
                 
                 role = reg_data.get('role', 'patient')
                 
