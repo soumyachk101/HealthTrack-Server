@@ -7,7 +7,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import authenticate, login
 from django.contrib.auth import get_user_model
-from .models import ServiceProvider
+from .models import ServiceProvider, OTP
 from core.models import ActivityLog
 
 # User = get_user_model() # Moved inside functions to avoid AppRegistryNotReady
@@ -67,11 +67,9 @@ def login_api(request):
             user = authenticate(request, username=username, password=password)
             
             if user:
-                # Generate OTP
-                otp = str(random.randint(100000, 999999))
-                request.session['otp'] = otp
-                request.session['otp_user_id'] = user.id
-                request.session['otp_type'] = 'login'
+                # Generate OTP using the model
+                otp_record = OTP.create_otp(user.email, 'login')
+                otp = otp_record.otp_code
                 
                 # Send OTP email
                 send_otp_email(user.email, otp, user.first_name)
@@ -103,16 +101,24 @@ def register_api(request):
             if User.objects.filter(email=email).exists():
                 return JsonResponse({'success': False, 'error': 'Email already registered'}, status=400)
             
-            # Store registration data in session
-            request.session['temp_reg_data'] = data
+            # Store registration data in temporary storage (we'll use a dictionary as a simple cache)
+            import uuid
+            temp_id = str(uuid.uuid4())
+            # In a real serverless environment, we'd use a cache like Redis
+            # For now, we'll store in a simple in-memory dict (not suitable for production serverless)
+            if not hasattr(register_api, 'temp_storage'):
+                register_api.temp_storage = {}
+            register_api.temp_storage[temp_id] = data
             
-            # Generate OTP
-            otp = str(random.randint(100000, 999999))
-            request.session['otp'] = otp
-            request.session['otp_type'] = 'register'
+            # Generate OTP using the model
+            otp_record = OTP.create_otp(email, 'register')
+            otp = otp_record.otp_code
             
             # Send OTP email
             send_otp_email(email, otp, data.get('first_name'))
+            
+            # Store temp_id in session or return it to frontend to use later
+            request.session['temp_reg_id'] = temp_id
             
             return JsonResponse({
                 'success': True,
@@ -130,22 +136,27 @@ def verify_otp_api(request):
         try:
             data = json.loads(request.body)
             entered_otp = data.get('otp')
-            generated_otp = request.session.get('otp')
-            otp_type = request.session.get('otp_type')
+            email = data.get('email')  # Need email to look up OTP
+            otp_type = data.get('otp_type', 'register')  # Default to register
             
-            if not generated_otp:
-                return JsonResponse({'success': False, 'error': 'Invalid or expired OTP'}, status=400)
-            
-            # Allow '999999' as a bypass in DEBUG mode for easier testing
-            is_valid = (entered_otp == generated_otp) or (settings.DEBUG and entered_otp == '999999')
-            
-            if not is_valid:
+            # Validate OTP using the model
+            otp_record = OTP.validate_otp(email, entered_otp, otp_type)
+            if not otp_record:
                 return JsonResponse({'success': False, 'error': 'Invalid or expired OTP'}, status=400)
             
             User = get_user_model()
             
             if otp_type == 'register':
-                reg_data = request.session.get('temp_reg_data')
+                # Get registration data from our temporary storage
+                temp_id = request.session.get('temp_reg_id')
+                if not temp_id or not hasattr(register_api, 'temp_storage') or temp_id not in register_api.temp_storage:
+                    return JsonResponse({'success': False, 'error': 'Registration session expired'}, status=400)
+                
+                reg_data = register_api.temp_storage[temp_id]
+                # Clean up temporary storage
+                del register_api.temp_storage[temp_id]
+                request.session.pop('temp_reg_id', None)
+                
                 role = reg_data.get('role', 'patient')
                 
                 # Create user
@@ -171,15 +182,8 @@ def verify_otp_api(request):
                 
                 user.is_email_verified = True
                 user.save()
-            else:
-                user_id = request.session.get('otp_user_id')
-                user = User.objects.get(id=user_id)
-            
-            # Clear session
-            del request.session['otp']
-            request.session.pop('otp_type', None)
-            request.session.pop('otp_user_id', None)
-            request.session.pop('temp_reg_data', None)
+            else:  # login case
+                user = User.objects.get(email=email)
             
             token = generate_token(user)
             
@@ -202,28 +206,17 @@ def verify_otp_api(request):
 def resend_otp_api(request):
     if request.method == 'POST':
         try:
-            otp_type = request.session.get('otp_type')
-            email = None
-            first_name = None
-            
-            if otp_type == 'register':
-                reg_data = request.session.get('temp_reg_data')
-                if reg_data:
-                    email = reg_data.get('email')
-                    first_name = reg_data.get('first_name')
-            elif otp_type == 'login':
-                user_id = request.session.get('otp_user_id')
-                if user_id:
-                    user = get_user_model().objects.get(id=user_id)
-                    email = user.email
-                    first_name = user.first_name
+            data = json.loads(request.body)
+            otp_type = data.get('otp_type', 'register')
+            email = data.get('email')
+            first_name = data.get('first_name', '')
             
             if not email:
-                return JsonResponse({'success': False, 'error': 'No active session found. Please register or login again.'}, status=400)
+                return JsonResponse({'success': False, 'error': 'Email is required to resend OTP.'}, status=400)
             
-            # Generate new OTP
-            otp = str(random.randint(100000, 999999))
-            request.session['otp'] = otp
+            # Generate new OTP using the model
+            otp_record = OTP.create_otp(email, otp_type)
+            otp = otp_record.otp_code
             
             # Send OTP email
             send_otp_email(email, otp, first_name)

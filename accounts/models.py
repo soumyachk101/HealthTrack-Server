@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
+from datetime import timedelta
 
 class User(AbstractUser):
     USER_TYPE_CHOICES = [
@@ -64,3 +65,57 @@ class ServiceProvider(models.Model):
 
     def __str__(self):
         return self.business_name
+
+
+class OTP(models.Model):
+    OTP_TYPES = [
+        ('register', 'Registration'),
+        ('login', 'Login'),
+        ('password_reset', 'Password Reset'),
+    ]
+    
+    email = models.EmailField()
+    otp_code = models.CharField(max_length=6)
+    otp_type = models.CharField(max_length=20, choices=OTP_TYPES)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_used = models.BooleanField(default=False)
+    expires_at = models.DateTimeField()
+    
+    def __str__(self):
+        return f"{self.email} - {self.otp_code}"
+    
+    @classmethod
+    def create_otp(cls, email, otp_type):
+        import datetime
+        from django.utils import timezone
+        
+        # Delete any existing unused OTPs for this email and type
+        cls.objects.filter(email=email, otp_type=otp_type, is_used=False).delete()
+        
+        # Create new OTP that expires in 10 minutes
+        expires_at = timezone.now() + datetime.timedelta(minutes=10)
+        import random
+        otp_code = str(random.randint(100000, 999999))
+        otp_instance = cls.objects.create(
+            email=email,
+            otp_code=otp_code,
+            otp_type=otp_type,
+            expires_at=expires_at
+        )
+        return otp_instance
+    
+    @classmethod
+    def validate_otp(cls, email, otp_code, otp_type):
+        try:
+            otp_instance = cls.objects.get(
+                email=email,
+                otp_code=otp_code,
+                otp_type=otp_type,
+                is_used=False,
+                expires_at__gt=timezone.now()
+            )
+            otp_instance.is_used = True
+            otp_instance.save()
+            return otp_instance
+        except cls.DoesNotExist:
+            return None
