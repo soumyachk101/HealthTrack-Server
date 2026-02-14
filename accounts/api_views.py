@@ -197,3 +197,42 @@ def verify_otp_api(request):
         except Exception as e:
             return JsonResponse({'success': False, 'error': str(e)}, status=400)
     return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
+
+@csrf_exempt
+def resend_otp_api(request):
+    if request.method == 'POST':
+        try:
+            otp_type = request.session.get('otp_type')
+            email = None
+            first_name = None
+            
+            if otp_type == 'register':
+                reg_data = request.session.get('temp_reg_data')
+                if reg_data:
+                    email = reg_data.get('email')
+                    first_name = reg_data.get('first_name')
+            elif otp_type == 'login':
+                user_id = request.session.get('otp_user_id')
+                if user_id:
+                    user = get_user_model().objects.get(id=user_id)
+                    email = user.email
+                    first_name = user.first_name
+            
+            if not email:
+                return JsonResponse({'success': False, 'error': 'No active session found. Please register or login again.'}, status=400)
+            
+            # Generate new OTP
+            otp = str(random.randint(100000, 999999))
+            request.session['otp'] = otp
+            
+            # Send OTP email
+            send_otp_email(email, otp, first_name)
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'A new verification code has been sent to your email'
+            })
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=400)
+    return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
