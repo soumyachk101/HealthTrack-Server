@@ -6,6 +6,19 @@ from . import api_views
 urlpatterns = [
     path('', views.home, name='home'),
     path('api/dashboard/', api_views.dashboard_api, name='dashboard_api'),
+    path('api/health-track/add/', api_views.add_health_record_api, name='add_health_record_api'),
+    path('api/medicines/add/', api_views.add_medicine_api, name='add_medicine_api'),
+    path('api/prescriptions/add/', api_views.add_prescription_api, name='add_prescription_api'),
+    
+    # Getter APIs
+    path('api/medicines/', api_views.medicines_api, name='medicines_api'),
+    path('api/health-track/', api_views.health_track_api, name='health_track_api'),
+    path('api/prescriptions/', api_views.prescriptions_api, name='prescriptions_api'),
+    path('api/profile/', api_views.profile_api, name='profile_api'),
+    path('api/mental-health/', api_views.mental_health_api, name='mental_health_api'),
+    path('api/lifestyle/', api_views.lifestyle_api, name='lifestyle_api'),
+    path('api/insurance/', api_views.insurance_api, name='insurance_api'),
+    path('api/past-records/', api_views.past_records_api, name='past_records_api'),
     path('dashboard/', views.dashboard, name='dashboard'),
     path('provider-dashboard/', views.provider_dashboard, name='provider_dashboard'),
     path('medicines/', views.medicines, name='medicines'),
