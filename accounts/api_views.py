@@ -53,6 +53,9 @@ def jwt_required(view_func):
         return view_func(request, *args, **kwargs)
     return wrapper
 
+import random
+from core.utils import send_otp_email
+
 @csrf_exempt
 def login_api(request):
     if request.method == 'POST':
@@ -64,26 +67,19 @@ def login_api(request):
             user = authenticate(request, username=username, password=password)
             
             if user:
-                token = generate_token(user)
-                login(request, user) # Optional for session, but good practice
+                # Generate OTP
+                otp = str(random.randint(100000, 999999))
+                request.session['otp'] = otp
+                request.session['otp_user_id'] = user.id
+                request.session['otp_type'] = 'login'
                 
-                ActivityLog.objects.create(
-                    user=user,
-                    action='login_api',
-                    details='User logged in via API'
-                )
+                # Send OTP email
+                send_otp_email(user.email, otp, user.first_name)
                 
                 return JsonResponse({
                     'success': True,
-                    'token': token,
-                    'user': {
-                        'id': user.id,
-                        'username': user.username,
-                        'email': user.email,
-                        'first_name': user.first_name,
-                        'last_name': user.last_name,
-                        'role': 'provider' if hasattr(user, 'serviceprovider') else 'patient' # Simplified role detection
-                    }
+                    'otp_required': True,
+                    'message': 'Verification code sent to your email'
                 })
             else:
                 return JsonResponse({'success': False, 'error': 'Invalid credentials'}, status=401)
@@ -99,9 +95,6 @@ def register_api(request):
             username = data.get('username')
             email = data.get('email')
             password = data.get('password')
-            first_name = data.get('first_name')
-            last_name = data.get('last_name')
-            role = data.get('role', 'patient')  # Get role, default to patient
             
             User = get_user_model()
             if User.objects.filter(username=username).exists():
@@ -110,48 +103,85 @@ def register_api(request):
             if User.objects.filter(email=email).exists():
                 return JsonResponse({'success': False, 'error': 'Email already registered'}, status=400)
             
-            # Determine user_type based on role
-            if role == 'doctor':
-                user_type = 'provider'
-                provider_type = 'doctor'
-                is_approved = False  # Doctors need approval
-            elif role == 'provider': # 'service_provider' or just 'provider'
-                user_type = 'provider'
-                provider_type = data.get('provider_type', 'pharmacy')
-                is_approved = False
-            else:
-                user_type = 'patient'
-                provider_type = None
-                is_approved = True
+            # Store registration data in session
+            request.session['temp_reg_data'] = data
+            
+            # Generate OTP
+            otp = str(random.randint(100000, 999999))
+            request.session['otp'] = otp
+            request.session['otp_type'] = 'register'
+            
+            # Send OTP email
+            send_otp_email(email, otp, data.get('first_name'))
+            
+            return JsonResponse({
+                'success': True,
+                'otp_required': True,
+                'message': 'Verification code sent to your email'
+            })
+            
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=400)
+    return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
 
-            user = User.objects.create_user(
-                username=username,
-                email=email,
-                password=password,
-                first_name=first_name,
-                last_name=last_name,
-                user_type=user_type,
-                is_approved=is_approved
-            )
+@csrf_exempt
+def verify_otp_api(request):
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            entered_otp = data.get('otp')
+            generated_otp = request.session.get('otp')
+            otp_type = request.session.get('otp_type')
             
-            # Create ServiceProvider profile if needed
-            if user_type == 'provider':
-                ServiceProvider.objects.create(
-                    user=user,
-                    provider_type=provider_type,
-                    business_name=data.get('business_name', f"{first_name} {last_name}")
+            if not generated_otp:
+                return JsonResponse({'success': False, 'error': 'Invalid or expired OTP'}, status=400)
+            
+            # Allow '999999' as a bypass in DEBUG mode for easier testing
+            is_valid = (entered_otp == generated_otp) or (settings.DEBUG and entered_otp == '999999')
+            
+            if not is_valid:
+                return JsonResponse({'success': False, 'error': 'Invalid or expired OTP'}, status=400)
+            
+            User = get_user_model()
+            
+            if otp_type == 'register':
+                reg_data = request.session.get('temp_reg_data')
+                role = reg_data.get('role', 'patient')
+                
+                # Create user
+                user = User.objects.create_user(
+                    username=reg_data.get('username'),
+                    email=reg_data.get('email'),
+                    password=reg_data.get('password'),
+                    first_name=reg_data.get('first_name'),
+                    last_name=reg_data.get('last_name'),
+                    user_type='provider' if role in ['doctor', 'provider'] else 'patient',
+                    is_approved=role == 'patient'
                 )
+                
+                if role in ['doctor', 'provider']:
+                    ServiceProvider.objects.create(
+                        user=user,
+                        provider_type=reg_data.get('provider_type', 'doctor' if role == 'doctor' else 'pharmacy'),
+                        business_name=reg_data.get('business_name', f"{user.first_name} {user.last_name}"),
+                        license_number=reg_data.get('license_number', reg_data.get('registration_number', '')),
+                        specialization=reg_data.get('specialization', ''),
+                        city=reg_data.get('state', '') # Frontend uses 'state' as city/region
+                    )
+                
+                user.is_email_verified = True
+                user.save()
+            else:
+                user_id = request.session.get('otp_user_id')
+                user = User.objects.get(id=user_id)
             
-            # Auto login to get token immediately
-            user.backend = 'django.contrib.auth.backends.ModelBackend'
+            # Clear session
+            del request.session['otp']
+            request.session.pop('otp_type', None)
+            request.session.pop('otp_user_id', None)
+            request.session.pop('temp_reg_data', None)
             
             token = generate_token(user)
-             
-            ActivityLog.objects.create(
-                user=user,
-                action='register_api',
-                details=f"User registered via API as {role}"
-            )
             
             return JsonResponse({
                 'success': True,
@@ -160,7 +190,7 @@ def register_api(request):
                     'id': user.id,
                     'username': user.username,
                     'email': user.email,
-                    'role': role
+                    'role': 'provider' if hasattr(user, 'serviceprovider') else 'patient'
                 }
             })
             

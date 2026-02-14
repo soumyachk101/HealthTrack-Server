@@ -15,5 +15,6 @@ urlpatterns = [
     # API endpoints for SPA
     path('api/login/', api_views.login_api, name='api_login'),
     path('api/register/', api_views.register_api, name='api_register'),
+    path('api/verify-otp/', api_views.verify_otp_api, name='api_verify_otp'),
 ]
 
