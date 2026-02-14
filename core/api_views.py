@@ -3,6 +3,7 @@ from django.db.models import Avg
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
 from django.utils.timesince import timesince
+from django.middleware.csrf import get_token
 
 from accounts.api_views import jwt_required
 
@@ -289,7 +290,7 @@ def mental_health_api(request):
     logs = MentalHealthLog.objects.filter(user=user).order_by('-recorded_at')
     
     # Calculate average mood
-    avg_mood = logs.aggregate(models.Avg('mood_score'))['mood_score__avg'] or 0
+    avg_mood = logs.aggregate(Avg('mood_score'))['mood_score__avg'] or 0
     
     logs_data = []
     for log in logs:
