@@ -1,0 +1,2 @@
+Status Code: 200
+Response: {"response": "Hello! Yes, I'm here to help you with any health information or questions you might have. How can I assist you today? Please remember that while I can provide general advice, it's important to consult a healthcare professional for any serious concerns."}

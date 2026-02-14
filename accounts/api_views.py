@@ -101,6 +101,7 @@ def register_api(request):
             password = data.get('password')
             first_name = data.get('first_name')
             last_name = data.get('last_name')
+            role = data.get('role', 'patient')  # Get role, default to patient
             
             User = get_user_model()
             if User.objects.filter(username=username).exists():
@@ -109,25 +110,47 @@ def register_api(request):
             if User.objects.filter(email=email).exists():
                 return JsonResponse({'success': False, 'error': 'Email already registered'}, status=400)
             
+            # Determine user_type based on role
+            if role == 'doctor':
+                user_type = 'provider'
+                provider_type = 'doctor'
+                is_approved = False  # Doctors need approval
+            elif role == 'provider': # 'service_provider' or just 'provider'
+                user_type = 'provider'
+                provider_type = data.get('provider_type', 'pharmacy')
+                is_approved = False
+            else:
+                user_type = 'patient'
+                provider_type = None
+                is_approved = True
+
             user = User.objects.create_user(
                 username=username,
                 email=email,
                 password=password,
                 first_name=first_name,
-                last_name=last_name
+                last_name=last_name,
+                user_type=user_type,
+                is_approved=is_approved
             )
             
-            # Auto login to get token immediately? 
-            # Or assume redirect to login? Let's return token for auto-login.
+            # Create ServiceProvider profile if needed
+            if user_type == 'provider':
+                ServiceProvider.objects.create(
+                    user=user,
+                    provider_type=provider_type,
+                    business_name=data.get('business_name', f"{first_name} {last_name}")
+                )
+            
+            # Auto login to get token immediately
             user.backend = 'django.contrib.auth.backends.ModelBackend'
-            # login(request, user)
             
             token = generate_token(user)
              
             ActivityLog.objects.create(
                 user=user,
                 action='register_api',
-                details='User registered via API'
+                details=f"User registered via API as {role}"
             )
             
             return JsonResponse({
@@ -136,7 +159,8 @@ def register_api(request):
                 'user': {
                     'id': user.id,
                     'username': user.username,
-                    'email': user.email
+                    'email': user.email,
+                    'role': role
                 }
             })
             
