@@ -188,11 +188,11 @@ CSRF_TRUSTED_ORIGINS = os.environ.get('CSRF_TRUSTED_ORIGINS', 'https://*.replit.
 
 # CSRF and Session settings for production
 CSRF_COOKIE_HTTPONLY = False  # Need to be accessible by JavaScript for frontend
-CSRF_COOKIE_SECURE = not DEBUG  # Only secure in production
-CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SECURE = True  # Required for SameSite=None
+CSRF_COOKIE_SAMESITE = 'None'  # Required for cross-site requests (Netlify to Vercel)
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SECURE = not DEBUG  # Only secure in production
-SESSION_COOKIE_SAMESITE = 'Lax'  # Important for cross-origin requests
+SESSION_COOKIE_SECURE = True  # Required for SameSite=None
+SESSION_COOKIE_SAMESITE = 'None'  # Required for cross-site requests (Netlify to Vercel)
 
 JAZZMIN_SETTINGS = {
     "site_title": "HealthTrack+ Admin",
