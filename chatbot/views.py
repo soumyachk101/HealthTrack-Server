@@ -42,10 +42,6 @@ def chat_api(request):
         client = OpenAI(
             api_key=api_key,
             base_url="https://openrouter.ai/api/v1",
-            default_headers={
-                "HTTP-Referer": "http://localhost:8000",
-                "X-Title": "HealthTrack+"
-            }
         )
 
         # System instruction for the health assistant
