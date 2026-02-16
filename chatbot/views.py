@@ -104,7 +104,6 @@ def chat_api(request):
         return JsonResponse({'error': 'Invalid JSON format'}, status=400)
     except Exception as e:
         logger.error(f"Error in chat_api: {str(e)}", exc_info=True)
-        error_message = 'An error occurred while processing your request. Please try again.'
-        if settings.DEBUG:
-            error_message = f'An error occurred: {str(e)}'
+        # TEMPORARY DEBUGGING: Always return the real error
+        error_message = f'DEBUG ERROR: {str(e)} | Key: {bool(api_key)}' 
         return JsonResponse({'error': error_message}, status=500)
