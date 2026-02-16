@@ -3,7 +3,6 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.conf import settings
-from django.conf import settings
 # from openai import OpenAI # Moved inside view to prevent startup errors if missing
 import json
 import logging
@@ -12,8 +11,13 @@ import os
 logger = logging.getLogger(__name__)
 
 @csrf_exempt
-@require_http_methods(["POST"])
+@require_http_methods(["POST", "OPTIONS"])
 def chat_api(request):
+    # CORS preflight support (browser sends OPTIONS for application/json)
+    if request.method == "OPTIONS":
+        return JsonResponse({}, status=200)
+
+    api_key = None
     try:
         data = json.loads(request.body)
         user_message = data.get('message', '')
@@ -100,6 +104,8 @@ def chat_api(request):
         return JsonResponse({'error': 'Invalid JSON format'}, status=400)
     except Exception as e:
         logger.error(f"Error in chat_api: {str(e)}", exc_info=True)
-        # TEMPORARY DEBUGGING: Always return the real error
-        error_message = f'DEBUG ERROR: {str(e)} | Key: {bool(api_key)}' 
-        return JsonResponse({'error': error_message}, status=500)
+        # Don't leak internal errors in production responses.
+        if getattr(settings, "DEBUG", False):
+            error_message = f"DEBUG ERROR: {str(e)} | KeyPresent: {bool(api_key)}"
+            return JsonResponse({'error': error_message}, status=500)
+        return JsonResponse({'error': 'Chat service error. Please try again later.'}, status=500)
