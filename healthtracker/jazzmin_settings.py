@@ -1,0 +1,65 @@
+
+# Jazzmin Configuration
+JAZZMIN_SETTINGS = {
+    "site_title": "HealthTrack+ Admin",
+    "site_header": "HealthTrack+",
+    "site_brand": "HealthTrack+",
+    "welcome_sign": "Welcome to HealthTrack+ Admin",
+    "copyright": "HealthTrack+ Ltd",
+    "search_model": ["accounts.User", "core.HealthRecord"],
+    "user_avatar": "profile_image",
+    "topmenu_links": [
+        {"name": "Home", "url": "home", "permissions": ["auth.view_user"]},
+        {"name": "Support", "url": "https://github.com/farridav/django-jazzmin/issues", "new_window": True},
+        {"model": "accounts.User"},
+        {"app": "core"},
+    ],
+    "show_sidebar": True,
+    "navigation_expanded": True,
+    "hide_apps": [],
+    "hide_models": [],
+    "order_with_respect_to": ["accounts", "core"],
+    "icons": {
+        "auth": "fas fa-users-cog",
+        "auth.user": "fas fa-user",
+        "auth.Group": "fas fa-users",
+        "accounts.User": "fas fa-user-circle",
+        "core.HealthRecord": "fas fa-heartbeat",
+        "core.Medicine": "fas fa-pills",
+        "core.Prescription": "fas fa-file-prescription",
+    },
+    "default_icon_parents": "fas fa-chevron-circle-right",
+    "default_icon_children": "fas fa-circle",
+    "related_modal_active": False,
+    "custom_css": None,
+    "custom_js": None,
+    "use_google_fonts_cdn": True,
+    "show_ui_builder": True,
+}
+
+JAZZMIN_UI_TWEAKS = {
+    "navbar_small_text": False,
+    "footer_small_text": False,
+    "body_small_text": False,
+    "brand_small_text": False,
+    "brand_colour": "navbar-teal",
+    "accent": "accent-teal",
+    "navbar": "navbar-dark",
+    "no_navbar_border": False,
+    "navbar_fixed": False,
+    "layout_boxed": False,
+    "footer_fixed": False,
+    "sidebar_fixed": False,
+    "sidebar": "sidebar-dark-teal",
+    "sidebar_nav_small_text": False,
+    "theme": "default",
+    "dark_mode_theme": None,
+    "button_classes": {
+        "primary": "btn-primary",
+        "secondary": "btn-secondary",
+        "info": "btn-info",
+        "warning": "btn-warning",
+        "danger": "btn-danger",
+        "success": "btn-success"
+    }
+}
