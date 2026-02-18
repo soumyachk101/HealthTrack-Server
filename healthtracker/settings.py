@@ -11,7 +11,9 @@ SECRET_KEY = os.environ.get('SESSION_SECRET', 'django-insecure-dev-key-change-in
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 
-DEBUG = os.environ.get('DEBUG', 'True').lower() in ('true', '1', 'yes')
+# Default to safe behavior on Vercel (production), but keep local-dev convenient.
+_default_debug = 'False' if os.environ.get('VERCEL') else 'True'
+DEBUG = os.environ.get('DEBUG', _default_debug).lower() in ('true', '1', 'yes')
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS if host.strip()]  # Clean up whitespace

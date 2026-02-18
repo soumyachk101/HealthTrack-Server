@@ -9,7 +9,7 @@ from accounts.api_views import jwt_required
 
 from .models import (
     HealthRecord, Medicine, Prescription, MentalHealthLog,
-    InsurancePolicy, LifestyleLog, ActivityLog
+    InsurancePolicy, LifestyleLog, ActivityLog, Appointment, ServiceRequest
 )
 
 @csrf_exempt
@@ -381,3 +381,213 @@ def past_records_api(request):
         'health_records': health_data,
         'prescriptions': prescription_data
     })
+
+
+@csrf_exempt
+@jwt_required
+def appointments_api(request):
+    """
+    API for listing and creating appointments.
+    GET: List appointments (Doctor sees their schedule, Patient sees their bookings)
+    POST: Create a new appointment
+    """
+    if request.method == 'GET':
+        User = get_user_model()
+        
+        # Decide which appointments to show based on user role
+        if getattr(request.user, 'user_type', '') == 'provider': # Assuming doctor is provider/doctor
+            # Check if doctor
+            try:
+                provider = request.user.provider_profile
+                if provider.provider_type == 'doctor':
+                    appointments = Appointment.objects.filter(doctor=request.user)
+                else:
+                    return JsonResponse({'success': False, 'error': 'Not a doctor'}, status=403)
+            except:
+                return JsonResponse({'success': False, 'error': 'Provider profile not found'}, status=404)
+        else:
+            # Patient
+            appointments = Appointment.objects.filter(patient=request.user)
+            
+        data = []
+        for appt in appointments:
+            data.append({
+                'id': appt.id,
+                'patient_name': appt.patient.get_full_name(),
+                'doctor_name': appt.doctor.get_full_name(),
+                'date': appt.date,
+                'time': appt.time,
+                'reason': appt.reason,
+                'status': appt.status,
+                'type': appt.type,
+                'meeting_link': appt.meeting_link
+            })
+            
+        return JsonResponse({'success': True, 'appointments': data})
+
+    elif request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            User = get_user_model()
+            
+            doctor_id = data.get('doctor_id')
+            date = data.get('date')
+            time = data.get('time')
+            reason = data.get('reason')
+            type = data.get('type', 'Video Consult')
+            
+            doctor = User.objects.get(id=doctor_id)
+            
+            appointment = Appointment.objects.create(
+                patient=request.user,
+                doctor=doctor,
+                date=date,
+                time=time,
+                reason=reason,
+                type=type
+            )
+            
+            ActivityLog.objects.create(
+                user=request.user,
+                action='appointment_booked',
+                details=f"Booked appointment with Dr. {doctor.last_name}"
+            )
+            
+            return JsonResponse({'success': True, 'message': 'Appointment booked successfully', 'id': appointment.id})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=400)
+            
+    return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
+
+
+@csrf_exempt
+@jwt_required
+def service_requests_api(request):
+    """
+    API for listing and creating service requests.
+    """
+    if request.method == 'GET':
+        if getattr(request.user, 'user_type', '') == 'provider':
+             requests = ServiceRequest.objects.filter(provider=request.user)
+        else:
+             requests = ServiceRequest.objects.filter(patient=request.user)
+             
+        data = []
+        for req in requests:
+            data.append({
+                'id': req.id,
+                'patient_name': req.patient.get_full_name(),
+                'provider_name': req.provider.get_full_name(),
+                'service_name': req.service_name,
+                'price': req.service_price,
+                'status': req.status,
+                'address': req.address,
+                'scheduled_date': req.scheduled_date
+            })
+            
+        return JsonResponse({'success': True, 'requests': data})
+
+    elif request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            User = get_user_model()
+            
+            provider_id = data.get('provider_id')
+            service_name = data.get('service_name')
+            price = data.get('price')
+            address = data.get('address')
+            
+            provider = User.objects.get(id=provider_id)
+            
+            req = ServiceRequest.objects.create(
+                patient=request.user,
+                provider=provider,
+                service_name=service_name,
+                service_price=price,
+                address=address
+            )
+            
+            ActivityLog.objects.create(
+                user=request.user,
+                action='service_requested',
+                details=f"Requested {service_name} from {provider.username}"
+            )
+            
+            return JsonResponse({'success': True, 'message': 'Service requested successfully', 'id': req.id})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=400)
+            
+    return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
+
+
+@csrf_exempt
+@jwt_required
+def appointment_action_api(request, appointment_id):
+    """
+    API for doctors to accept/reject/complete appointments.
+    """
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            action = data.get('action') # accept, reject, complete
+            
+            appointment = Appointment.objects.get(id=appointment_id)
+            
+            # Verify ownership (doctor)
+            if appointment.doctor != request.user:
+                return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+                
+            if action == 'accept':
+                appointment.status = 'confirmed'
+                # Generate meeting link if video
+                if appointment.type == 'Video Consult':
+                     appointment.meeting_link = f"https://meet.google.com/new" # Placeholder
+            elif action == 'reject':
+                appointment.status = 'cancelled'
+            elif action == 'complete':
+                appointment.status = 'completed'
+                
+            appointment.save()
+            return JsonResponse({'success': True, 'status': appointment.status})
+            
+        except Appointment.DoesNotExist:
+             return JsonResponse({'success': False, 'error': 'Appointment not found'}, status=404)
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=400)
+            
+    return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)
+
+
+@csrf_exempt
+@jwt_required
+def service_request_action_api(request, request_id):
+    """
+    API for providers to accept/decline/complete service requests.
+    """
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            action = data.get('action') # accept, decline, complete
+            
+            req = ServiceRequest.objects.get(id=request_id)
+            
+            # Verify ownership (provider)
+            if req.provider != request.user:
+                return JsonResponse({'success': False, 'error': 'Permission denied'}, status=403)
+                
+            if action == 'accept':
+                req.status = 'accepted'
+            elif action == 'decline':
+                req.status = 'declined'
+            elif action == 'complete':
+                req.status = 'completed'
+                
+            req.save()
+            return JsonResponse({'success': True, 'status': req.status})
+            
+        except ServiceRequest.DoesNotExist:
+             return JsonResponse({'success': False, 'error': 'Service request not found'}, status=404)
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=400)
+            
+    return JsonResponse({'success': False, 'error': 'Method not allowed'}, status=405)

@@ -218,3 +218,70 @@ class SystemSettings(models.Model):
 
     def __str__(self):
         return self.key
+
+
+class Appointment(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('confirmed', 'Confirmed'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+    ]
+    
+    patient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='appointments_as_patient')
+    doctor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='appointments_as_doctor')
+    date = models.DateField()
+    time = models.TimeField()
+    reason = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    type = models.CharField(max_length=50, default='Video Consult') # e.g., Video Consult, Clinic Visit
+    meeting_link = models.URLField(blank=True, null=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['date', 'time']
+
+    def __str__(self):
+        return f"{self.patient} with {self.doctor} on {self.date}"
+
+
+class Service(models.Model):
+    provider = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='services')
+    name = models.CharField(max_length=200)
+    description = models.TextField()
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    duration_minutes = models.IntegerField(default=60)
+    is_active = models.BooleanField(default=True)
+    
+    def __str__(self):
+        return f"{self.name} by {self.provider}"
+
+
+class ServiceRequest(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+        ('completed', 'Completed'),
+        ('declined', 'Declined'),
+        ('cancelled', 'Cancelled'),
+    ]
+    
+    patient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='service_requests')
+    provider = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='received_requests')
+    service_name = models.CharField(max_length=200) # Snapshot of service name
+    service_price = models.DecimalField(max_digits=10, decimal_places=2) # Snapshot of price
+    address = models.TextField()
+    scheduled_date = models.DateTimeField(null=True, blank=True)
+    items = models.TextField(blank=True) # For pharmacy/delivery: JSON or comma-separated list
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Request for {self.provider} from {self.patient}"
