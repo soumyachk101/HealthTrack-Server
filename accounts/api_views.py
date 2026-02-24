@@ -177,6 +177,13 @@ def verify_otp_api(request):
             
             token = generate_token(user)
             
+            user_role = 'patient'
+            if hasattr(user, 'serviceprovider'):
+                if user.serviceprovider.provider_type == 'doctor':
+                    user_role = 'doctor'
+                else:
+                    user_role = 'provider'
+
             return JsonResponse({
                 'success': True,
                 'token': token,
@@ -184,7 +191,7 @@ def verify_otp_api(request):
                     'id': user.id,
                     'username': user.username,
                     'email': user.email,
-                    'role': 'provider' if hasattr(user, 'serviceprovider') else 'patient'
+                    'role': user_role
                 }
             })
             
