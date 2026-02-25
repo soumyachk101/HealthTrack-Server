@@ -7,6 +7,7 @@ from django.conf import settings
 import json
 import logging
 import os
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -109,3 +110,69 @@ def chat_api(request):
             error_message = f"DEBUG ERROR: {str(e)} | KeyPresent: {bool(api_key)}"
             return JsonResponse({'error': error_message}, status=500)
         return JsonResponse({'error': 'Chat service error. Please try again later.'}, status=500)
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def tts_api(request):
+    """
+    Endpoint to convert text to speech using Sarvam API.
+    Expects JSON: { "text": "Hello world" }
+    """
+    if request.method == "OPTIONS":
+        return JsonResponse({}, status=200)
+
+    api_key = getattr(settings, 'SARVAM_API_KEY', None) or os.environ.get('SARVAM_API_KEY')
+    if not api_key or api_key == 'your_sarvam_api_key_here':
+        logger.error("Sarvam API Key is missing or invalid.")
+        return JsonResponse({'error': 'TTS configuration error: API key missing'}, status=503)
+
+    try:
+        data = json.loads(request.body)
+        text = data.get('text', '').strip()
+
+        if not text:
+            return JsonResponse({'error': 'No text provided'}, status=400)
+
+        # Truncate text if necessary to fit within limits (500 chars per Sarvam API docs request)
+        if len(text) > 450:
+             text = text[:450] + "..."
+
+        url = "https://api.sarvam.ai/text-to-speech"
+        
+        # Determine language (e.g., if it has Hindi characters, use hi-IN, else fallback to en-IN)
+        # Using hi-IN for Hindi setup or en-IN for English with Indian accent. Let's use en-IN by default.
+        payload = {
+            "inputs": [text],
+            "target_language_code": "hi-IN",
+            "speaker": "anushka", # Valid speakers for hi-IN include anushka
+            "pitch": 0,
+            "pace": 1.0,
+            "loudness": 1.5,
+            "speech_sample_rate": 22050,
+            "enable_preprocessing": True
+        }
+        
+        headers = {
+            "Content-Type": "application/json",
+            "api-subscription-key": api_key
+        }
+
+        response = requests.post(url, json=payload, headers=headers)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if "audios" in result and len(result["audios"]) > 0:
+                audio_base64 = result["audios"][0]
+                return JsonResponse({'audio': audio_base64})
+            else:
+                 logger.error(f"Sarvam API returned unexpected format: {result}")
+                 return JsonResponse({'error': 'Invalid response from TTS service'}, status=500)
+        else:
+            logger.error(f"Sarvam API error: {response.status_code} - {response.text}")
+            return JsonResponse({'error': f'TTS service error: {response.status_code}'}, status=500)
+
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON format'}, status=400)
+    except Exception as e:
+        logger.error(f"Error in tts_api: {str(e)}", exc_info=True)
+        return JsonResponse({'error': 'TTS service encountered an error.'}, status=500)
