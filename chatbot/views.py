@@ -66,9 +66,9 @@ def chat_api(request):
         # Call OpenAI API (OpenRouter)
         # Define fallback models in case the primary one is busy or invalid
         models_to_try = [
-            "google/gemini-2.0-flash-lite-preview-02-05:free",
+            "openrouter/free",
+            "stepfun/step-3.5-flash:free",
             "meta-llama/llama-3.2-3b-instruct:free",
-            "mistralai/mistral-small-24b-instruct-2501:free",
             "openai/gpt-4o-mini",
             "openai/gpt-3.5-turbo",
         ]
