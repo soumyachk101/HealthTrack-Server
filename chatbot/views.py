@@ -146,7 +146,7 @@ def tts_api(request):
         payload = {
             "inputs": [text],
             "target_language_code": "hi-IN",
-            "speaker": "anushka", # Valid speakers for hi-IN include anushka
+            "speaker": "priya", # Valid speakers for hi-IN include anushka, priya
             "pitch": 0,
             "pace": 1.0,
             "loudness": 1.5,
