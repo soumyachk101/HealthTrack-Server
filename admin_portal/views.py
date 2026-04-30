@@ -22,7 +22,10 @@ def admin_dashboard(request):
     """
     if not is_admin(request.user):
         return render(request, '403.html', status=403)
-    return render(request, 'core/react_app.html', {'page': 'AdminDashboard'})
+    return render(request, 'core/react_app.html', {
+        'page': 'AdminDashboard',
+        'debug': settings.DEBUG
+    })
 
 @login_required
 def admin_users(request):
