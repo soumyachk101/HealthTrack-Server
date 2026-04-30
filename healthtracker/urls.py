@@ -10,7 +10,7 @@ urlpatterns = [
 
     path('', include('core.urls')),
     path('accounts/', include('accounts.urls')),
-    path('accounts/', include('allauth.urls')),
+    # path('accounts/', include('allauth.urls')),
     path('admin-panel/', include('admin_portal.urls')),
     path('chatbot/', include('chatbot.urls')),
 ]

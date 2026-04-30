@@ -1,0 +1,33 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HealthTrack+</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    
+    {% if not debug %}
+    <link rel="stylesheet" href="{% static 'dist/assets/index.css' %}?v={% now 'U' %}">
+    {% endif %}
+</head>
+<body>
+    <div id="root" data-page="{{ page }}"></div>
+
+    {% if debug %}
+    <script type="module">
+        import RefreshRuntime from 'http://localhost:5173/@react-refresh'
+        RefreshRuntime.injectIntoGlobalHook(window)
+        window.$RefreshReg$ = () => { }
+        window.$RefreshSig$ = () => (type) => type
+        window.__vite_plugin_react_preamble_installed__ = true
+    </script>
+    <script type="module" src="http://localhost:5173/@vite/client"></script>
+    <script type="module" src="http://localhost:5173/src/main.tsx"></script>
+    {% else %}
+    <script type="module" src="{% static 'dist/assets/index.js' %}?v={% now 'U' %}"></script>
+    {% endif %}
+</body>
+</html>

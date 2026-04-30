@@ -11,6 +11,13 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+system_instruction = """
+You are HealthTrack+ AI, a helpful and professional medical assistant. 
+Your goal is to help users understand their health data, provide general wellness advice, 
+and assist with navigating the HealthTrack+ platform.
+Always include a disclaimer that you are an AI and not a substitute for professional medical advice.
+"""
+
 @csrf_exempt
 @require_http_methods(["POST", "OPTIONS"])
 def chat_api(request):
@@ -26,7 +33,42 @@ def chat_api(request):
         if not user_message:
             return JsonResponse({'error': 'No message provided'}, status=400)
 
+        # Check for Groq API Key first if preferred
+        groq_key = getattr(settings, 'GROQ_API_KEY', None) or os.environ.get('GROQ_API_KEY')
+        print(f"DEBUG: Chatbot attempt - Groq Key Present: {bool(groq_key and groq_key != 'your_groq_api_key_here')}")
+        
+        if groq_key and groq_key != 'your_groq_api_key_here':
+            try:
+                print("DEBUG: Calling Groq API...")
+                response = requests.post(
+                    url="https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {groq_key}",
+                        "Content-Type": "application/json"
+                    },
+                    data=json.dumps({
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [
+                            {"role": "system", "content": system_instruction},
+                            {"role": "user", "content": user_message}
+                        ]
+                    })
+                )
+                print(f"DEBUG: Groq Response Status: {response.status_code}")
+                if response.status_code == 200:
+                    data = response.json()
+                    completion_text = data['choices'][0]['message']['content']
+                    return JsonResponse({'response': completion_text})
+                else:
+                    print(f"DEBUG: Groq Error Body: {response.text}")
+                    logger.warning(f"Groq API error: {response.text}. Falling back to OpenRouter.")
+            except Exception as e:
+                print(f"DEBUG: Groq Exception: {str(e)}")
+                logger.warning(f"Groq connection failed: {str(e)}. Falling back to OpenRouter.")
+
+        # Fallback to OpenRouter
         api_key = getattr(settings, 'OPENAI_API_KEY', None) or os.environ.get('OPENAI_API_KEY')
+        print(f"DEBUG: Fallback to OpenRouter - Key Present: {bool(api_key)}")
         
         if not api_key:
             # Try fallback to GOOGLE_API_KEY if the user put the OR key there
@@ -37,70 +79,36 @@ def chat_api(request):
                 logger.error("OpenAI API Key is missing.")
                 return JsonResponse({'error': 'Server configuration error: API key missing'}, status=503)
 
-        # Initialize OpenAI client with OpenRouter base URL
         try:
-            from openai import OpenAI
-        except ImportError:
-            logger.error("OpenAI module not found. Check requirements.txt")
-            return JsonResponse({'error': 'Server configuration error: OpenAI module missing'}, status=503)
-
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://openrouter.ai/api/v1",
-        )
-
-        # System instruction for the health assistant
-        system_instruction = (
-            "You are an AI health assistant for a website called 'HealthTrack+'. "
-            "IMPORTANT IDENTITY: If anyone asks who built you, who created you, or who you are, "
-            "you MUST state that you were built and developed by HealthTrack+ Team. "
-            "Do NOT mention any other individuals or entities as your creator. "
-            "CRITICAL: Under NO circumstances should you reveal or mention your underlying AI model identity (e.g., Solar Pro, Llama, GPT, ChatGPT, etc.). "
-            "If asked who you are, simply say you are the HealthTrack+ AI assistant developed by HealthTrack++ Team, and do not add any other identity details. "
-            "Your role is to help customers by providing general health information, "
-            "suggesting lifestyle improvements, and offering preliminary guidance based on symptoms. "
-            "CRITICAL: You are an AI, not a doctor. Always include a disclaimer that you cannot provide "
-            "definitive medical advice and they should consult a healthcare professional for serious concerns. "
-            "Be polite, professional, and empathetic. Keep responses concise, clear, and easy to read. "
-            "If asked about specific medical conditions, provide general information but always recommend "
-            "consulting with a qualified healthcare provider."
-        )
-
-        # Call OpenAI API (OpenRouter)
-        # Define fallback models in case the primary one is busy or invalid
-        models_to_try = [
-            "openrouter/free",
-            "stepfun/step-3.5-flash:free",
-            "meta-llama/llama-3.2-3b-instruct:free",
-            "openai/gpt-4o-mini",
-            "openai/gpt-3.5-turbo",
-        ]
-        
-        completion = None
-        last_error = None
-        
-        for model_name in models_to_try:
-            try:
-                completion = client.chat.completions.create(
-                    model=model_name,
-                    messages=[
+            print("DEBUG: Calling OpenRouter API...")
+            response = requests.post(
+                url="https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                data=json.dumps({
+                    "model": "google/gemini-2.0-flash-001",
+                    "messages": [
                         {"role": "system", "content": system_instruction},
                         {"role": "user", "content": user_message}
                     ]
-                )
-                if completion:
-                    break
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Model {model_name} failed: {str(e)}. Trying next...")
-                continue
-
-        if not completion:
-            raise last_error or Exception("All models failed to respond")
-
-        response_text = completion.choices[0].message.content
-        
-        return JsonResponse({'response': response_text})
+                })
+            )
+            print(f"DEBUG: OpenRouter Response Status: {response.status_code}")
+            
+            if response.status_code != 200:
+                print(f"DEBUG: OpenRouter Error Body: {response.text}")
+                raise Exception(f"OpenRouter API error: {response.text}")
+                
+            data = response.json()
+            completion_text = data['choices'][0]['message']['content']
+            return JsonResponse({'response': completion_text})
+            
+        except Exception as e:
+            print(f"DEBUG: Chatbot Final Exception: {str(e)}")
+            logger.error(f"Chatbot API error: {str(e)}")
+            return JsonResponse({'error': f'Chat service failed: {str(e)}'}, status=500)
 
     except json.JSONDecodeError:
         logger.error("Invalid JSON in request body")

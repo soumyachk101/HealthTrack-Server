@@ -15,7 +15,7 @@ class User(AbstractUser):
     address = models.TextField(blank=True)
     city = models.CharField(max_length=100, blank=True)
     date_of_birth = models.DateField(null=True, blank=True)
-    profile_image = models.ImageField(upload_to='profiles/', blank=True, null=True)
+    profile_image = models.CharField(max_length=255, blank=True, null=True)
     emergency_contact = models.CharField(max_length=100, blank=True)
     emergency_phone = models.CharField(max_length=20, blank=True)
     blood_group = models.CharField(max_length=10, blank=True)
@@ -106,16 +106,28 @@ class OTP(models.Model):
     
     @classmethod
     def validate_otp(cls, email, otp_code, otp_type):
+        from django.utils import timezone
+        now = timezone.now()
+        print(f"DEBUG: Validating OTP - Email: {email}, Code: {otp_code}, Type: {otp_type}, Time: {now}")
+        
         try:
+            # Check all matching records to see what's wrong
+            all_matches = cls.objects.filter(email__iexact=email, otp_type=otp_type)
+            print(f"DEBUG: Found {all_matches.count()} total OTP records for this email/type")
+            for record in all_matches:
+                print(f"DEBUG: Record ID: {record.id}, Code: {record.otp_code}, Used: {record.is_used}, Expires: {record.expires_at}")
+
             otp_instance = cls.objects.get(
-                email=email,
+                email__iexact=email,
                 otp_code=otp_code,
                 otp_type=otp_type,
                 is_used=False,
-                expires_at__gt=timezone.now()
+                expires_at__gt=now
             )
             otp_instance.is_used = True
             otp_instance.save()
+            print("DEBUG: OTP Validation SUCCESS")
             return otp_instance
         except cls.DoesNotExist:
+            print("DEBUG: OTP Validation FAILED - No matching unused, non-expired record found")
             return None

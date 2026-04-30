@@ -30,6 +30,7 @@ The HealthTrack+ Team
         return False
     
     try:
+        print(f"--- [DEVELOPMENT ONLY] OTP for {email}: {otp} ---")
         print(f"Sending OTP email to {email} from {from_email}...")
         result = send_mail(
             subject,

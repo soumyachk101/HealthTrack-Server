@@ -33,11 +33,6 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'django.contrib.sites',
-    'allauth',
-    'allauth.account',
-    'allauth.socialaccount',
-    'allauth.socialaccount.providers.google',
     'corsheaders',
 
     'core',
@@ -50,7 +45,7 @@ SITE_ID = 1
 
 AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',
-    'allauth.account.auth_backends.AuthenticationBackend',
+    # 'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
 ACCOUNT_LOGIN_METHODS = {'email', 'username'}
@@ -83,7 +78,6 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'allauth.account.middleware.AccountMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
@@ -115,7 +109,7 @@ DATABASES = {
 }
 
 # Use the provided Neon PostgreSQL database
-DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://neondb_owner:npg_Lkb2sZFhJaV6@ep-raspy-cherry-ai38ytqe-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require')
+DATABASE_URL = os.environ.get('DATABASE_URL', None)
 
 if DATABASE_URL:
     import dj_database_url

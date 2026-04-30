@@ -77,6 +77,8 @@ def login_api(request):
                 return JsonResponse({
                     'success': True,
                     'otp_required': True,
+                    'email': user.email,
+                    'username': user.username,
                     'message': 'Verification code sent to your email'
                 })
             else:
@@ -128,8 +130,10 @@ def verify_otp_api(request):
         try:
             data = json.loads(request.body)
             entered_otp = data.get('otp')
-            email = data.get('email')  # Need email to look up OTP
-            otp_type = data.get('otp_type', 'register')  # Default to register
+            email = data.get('email')
+            otp_type = data.get('otp_type', 'register')
+            
+            print(f"DEBUG: Verify OTP attempt - Email: {email}, OTP: {entered_otp}, Type: {otp_type}")
             
             # Validate OTP using the model
             otp_record = OTP.validate_otp(email, entered_otp, otp_type)
@@ -173,12 +177,18 @@ def verify_otp_api(request):
                 user.is_email_verified = True
                 user.save()
             else:  # login case
-                user = User.objects.get(email=email)
+                username = data.get('username')
+                if username:
+                    user = User.objects.get(username=username)
+                else:
+                    user = User.objects.get(email=email)
             
             token = generate_token(user)
             
             user_role = 'patient'
-            if hasattr(user, 'serviceprovider'):
+            if user.is_superuser or user.user_type == 'admin':
+                user_role = 'admin'
+            elif hasattr(user, 'serviceprovider'):
                 if user.serviceprovider.provider_type == 'doctor':
                     user_role = 'doctor'
                 else:

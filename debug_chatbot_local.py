@@ -11,7 +11,7 @@ django.setup()
 # Override settings for debugging
 settings.DEBUG = True
 # Use the user's key
-os.environ['OPENAI_API_KEY'] = "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"
+os.environ['OPENAI_API_KEY'] = "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"
 
 from chatbot.views import chat_api
 

@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from . import api_views
 
 urlpatterns = [
     path('', views.admin_dashboard, name='admin_dashboard'),
@@ -12,4 +13,9 @@ urlpatterns = [
     path('health-data/', views.admin_health_data, name='admin_health_data'),
     path('reports/', views.admin_reports, name='admin_reports'),
     path('settings/', views.admin_settings, name='admin_settings'),
+    
+    # API Endpoints
+    path('api/stats/', api_views.admin_stats_api, name='admin_stats_api'),
+    path('api/users/', api_views.admin_users_api, name='admin_users_api'),
+    path('api/users/<int:user_id>/action/', api_views.admin_user_action_api, name='admin_user_action_api'),
 ]

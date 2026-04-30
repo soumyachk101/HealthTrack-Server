@@ -1,0 +1,1 @@
+function c(o){let t=null;if(document.cookie&&document.cookie!==""){const i=document.cookie.split(";");for(let e=0;e<i.length;e++){const n=i[e].trim();if(n.substring(0,o.length+1)===o+"="){t=decodeURIComponent(n.substring(o.length+1));break}}}return t}export{c as g};
