@@ -202,6 +202,37 @@ router.post('/resend-otp', async (req, res) => {
   }
 });
 
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'Email is required' });
+    }
+
+    const user = await promisifyDbGet('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
+    if (!user) {
+      return res.json({ success: true });
+    }
+
+    try {
+      await firebaseAuth.getUserByEmail(email.toLowerCase());
+    } catch (fbErr) {
+      if (fbErr.code === 'auth/user-not-found') {
+        await firebaseAuth.createUser({
+          email: email.toLowerCase(),
+          displayName: user.first_name ? `${user.first_name} ${user.last_name}`.trim() : user.username,
+          emailVerified: true
+        });
+      }
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Forgot password error:', e.message);
+    res.json({ success: true });
+  }
+});
+
 router.post('/google-login', async (req, res) => {
   try {
     const { credential } = req.body;
