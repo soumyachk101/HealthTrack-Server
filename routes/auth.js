@@ -229,6 +229,28 @@ router.post('/forgot-password', async (req, res) => {
   }
 });
 
+router.post('/update-password', async (req, res) => {
+  try {
+    const { email, new_password } = req.body;
+    if (!email || !new_password) {
+      return res.status(400).json({ success: false, error: 'Email and new password are required' });
+    }
+
+    const user = await promisifyDbGet('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const hashedPassword = await bcrypt.hash(new_password, SALT_ROUNDS);
+    await promisifyDbRun('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, user.id]);
+
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (e) {
+    console.error('Update password error:', e.message);
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
 router.post('/google-login', async (req, res) => {
   try {
     const { credential } = req.body;
@@ -281,13 +303,18 @@ router.post('/google-login', async (req, res) => {
 
 router.post('/verify-email-link', async (req, res) => {
   try {
-    const { firebase_token, email, username, otp_type } = req.body;
-    if (!firebase_token) {
-      return res.status(400).json({ success: false, error: 'Firebase token is required' });
-    }
+    const { firebase_token, email, username, otp_type, supabase_verified } = req.body;
 
-    const decodedToken = await firebaseAuth.verifyIdToken(firebase_token);
-    const verifiedEmail = decodedToken.email || email;
+    let verifiedEmail = email;
+
+    if (supabase_verified) {
+      verifiedEmail = email;
+    } else if (firebase_token) {
+      const decodedToken = await firebaseAuth.verifyIdToken(firebase_token);
+      verifiedEmail = decodedToken.email || email;
+    } else {
+      return res.status(400).json({ success: false, error: 'Verification token is required' });
+    }
 
     if (otp_type === 'register') {
       const regData = pendingRegistrations.get(verifiedEmail) || pendingRegistrations.get(email);
