@@ -23,11 +23,12 @@ function generateOtp() {
 }
 
 async function sendOtpEmail(email, otp, firstName) {
-  const fromEmail = process.env.EMAIL_HOST_USER || 'noreply@healthtrack.plus';
-  if (!fromEmail) {
+  const emailUser = process.env.EMAIL_HOST_USER;
+  if (!emailUser) {
     console.error('ERROR: EMAIL_HOST_USER is not configured!');
     return false;
   }
+  const fromEmail = `"HealthTrack+ (No-Reply)" <${emailUser}>`;
 
   console.log(`--- [DEVELOPMENT ONLY] OTP for ${email}: ${otp} ---`);
 
