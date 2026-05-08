@@ -15,11 +15,11 @@ router.get('/stats', adminRequired, async (req, res) => {
     res.json({
       success: true,
       stats: {
-        total_users: totalUsers.count,
-        patients: patients.count,
-        providers: providers.count,
-        pending_approvals: pendingApprovals.count,
-        total_records: totalRecords.count
+        total_users: Number(totalUsers.count),
+        patients: Number(patients.count),
+        providers: Number(providers.count),
+        pending_approvals: Number(pendingApprovals.count),
+        total_records: Number(totalRecords.count)
       }
     });
   } catch (e) {
@@ -54,13 +54,18 @@ router.get('/users', adminRequired, async (req, res) => {
         const provider = await promisifyDbGet('SELECT * FROM service_providers WHERE user_id = ?', [user.id]);
         if (provider) displayRole = provider.provider_type;
       }
+      const dj = user.date_joined;
+      let dateStr = '';
+      if (dj instanceof Date) dateStr = dj.toISOString().split('T')[0];
+      else if (typeof dj === 'string') dateStr = dj.split('T')[0];
+
       userList.push({
         id: user.id,
         username: user.username,
         email: user.email,
         user_type: displayRole,
         is_approved: user.is_approved === 1,
-        date_joined: user.date_joined ? user.date_joined.split('T')[0] : ''
+        date_joined: dateStr
       });
     }
     res.json({ success: true, users: userList });
