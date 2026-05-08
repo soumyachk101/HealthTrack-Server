@@ -18,12 +18,37 @@ app.use((req, res, next) => {
 });
 
 // CORS setup
-const corsOrigins = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000').split(',').map(s => s.trim());
-app.use(cors({
+const defaultCorsOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'https://healthtrack.store',
+  'https://www.healthtrack.store'
+];
+const corsOrigins = (process.env.CORS_ALLOWED_ORIGINS || defaultCorsOrigins.join(','))
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (corsOrigins.includes('*') || corsOrigins.includes(origin)) return true;
+
+  try {
+    const hostname = new URL(origin).hostname;
+    return hostname.endsWith('.vercel.app') ||
+      hostname.endsWith('.netlify.app') ||
+      hostname === 'healthtrack.store' ||
+      hostname.endsWith('.healthtrack.store');
+  } catch (e) {
+    return false;
+  }
+}
+
+const corsOptions = {
   origin: function(origin, callback) {
-    if (!origin || corsOrigins.includes(origin) || corsOrigins.includes('*') ||
-        origin.endsWith('.vercel.app') || origin.endsWith('.netlify.app') ||
-        origin.endsWith('.healthtrack.store') || origin === 'https://healthtrack.store') {
+    if (isAllowedOrigin(origin)) {
       callback(null, true);
     } else {
       callback(null, false);
@@ -32,10 +57,12 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Accept', 'Accept-Encoding', 'Authorization', 'Content-Type', 'DNT', 'Origin', 'User-Agent', 'X-Requested-With', 'X-CSRFToken']
-}));
+};
+
+app.use(cors(corsOptions));
 
 // Handle preflight for all routes
-app.options('*', cors());
+app.options('*', cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
