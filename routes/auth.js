@@ -307,7 +307,15 @@ router.post('/forgot-password', async (req, res) => {
     }
 
     const normalizedEmail = email.toLowerCase();
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const origin = req.get('origin');
+    const forwardedProto = (req.headers['x-forwarded-proto'] || '').toString();
+    const forwardedHost = (req.headers['x-forwarded-host'] || '').toString();
+    const inferredUrl = forwardedProto && forwardedHost ? `${forwardedProto}://${forwardedHost}` : null;
+    const frontendUrl =
+      process.env.FRONTEND_URL ||
+      inferredUrl ||
+      origin ||
+      'https://healthtrack.store';
     const { data, error: genError } = await generateRecoveryLink(
       supabase,
       normalizedEmail,
@@ -316,7 +324,11 @@ router.post('/forgot-password', async (req, res) => {
     );
 
     if (genError) {
-      console.error('Supabase generateLink error:', genError.message, genError.status || genError.statusCode || '');
+      console.error('Supabase generateLink error:', {
+        message: genError.message,
+        status: genError.status || genError.statusCode,
+        name: genError.name
+      });
       return res.status(500).json({ success: false, error: 'Failed to generate reset link' });
     }
 
