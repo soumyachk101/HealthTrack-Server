@@ -1,0 +1,7 @@
+node_modules/
+.env
+db.sqlite3
+uploads/prescriptions/*
+uploads/insurance/*
+!uploads/prescriptions/.gitkeep
+!uploads/insurance/.gitkeep
