@@ -1,8 +1,11 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
+const { OAuth2Client } = require('google-auth-library');
 const { promisifyDbGet, promisifyDbRun, promisifyDbAll } = require('../db');
 const { generateToken } = require('../middleware/auth');
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const router = express.Router();
 
@@ -195,6 +198,56 @@ router.post('/resend-otp', async (req, res) => {
     res.json({ success: true, message: 'A new verification code has been sent to your email' });
   } catch (e) {
     res.status(400).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/google-login', async (req, res) => {
+  try {
+    const { credential } = req.body;
+    if (!credential) {
+      return res.status(400).json({ success: false, error: 'Google credential is required' });
+    }
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+    const payload = ticket.getPayload();
+    const { email, given_name, family_name, picture, sub: googleId } = payload;
+
+    let user = await promisifyDbGet('SELECT * FROM users WHERE email = ?', [email]);
+
+    if (!user) {
+      const username = email.split('@')[0] + '_' + googleId.slice(-4);
+      const randomPassword = require('crypto').randomBytes(32).toString('hex');
+      const hashedPassword = await bcrypt.hash(randomPassword, SALT_ROUNDS);
+
+      const result = await promisifyDbRun(
+        `INSERT INTO users (username, email, password, first_name, last_name, user_type, is_approved, is_email_verified, profile_image)
+         VALUES (?, ?, ?, ?, ?, 'patient', 1, 1, ?)`,
+        [username, email, hashedPassword, given_name || '', family_name || '', picture || '']
+      );
+      user = await promisifyDbGet('SELECT * FROM users WHERE id = ?', [result.id]);
+    }
+
+    const token = generateToken(user);
+
+    let userRole = 'patient';
+    if (user.is_superuser === 1 || user.user_type === 'admin') userRole = 'admin';
+    else if (user.user_type === 'provider') {
+      const provider = await promisifyDbGet('SELECT * FROM service_providers WHERE user_id = ?', [user.id]);
+      if (provider && provider.provider_type === 'doctor') userRole = 'doctor';
+      else userRole = 'provider';
+    }
+
+    res.json({
+      success: true,
+      token,
+      user: { id: user.id, username: user.username, email: user.email, role: userRole }
+    });
+  } catch (e) {
+    console.error('Google login error:', e.message);
+    res.status(400).json({ success: false, error: 'Google authentication failed' });
   }
 });
 
