@@ -1,10 +1,17 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
+const { createClient } = require('@supabase/supabase-js');
 const { OAuth2Client } = require('google-auth-library');
 const { firebaseAuth } = require('../firebase');
 const { promisifyDbGet, promisifyDbRun, promisifyDbAll } = require('../db');
 const { generateToken } = require('../middleware/auth');
+
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL || '',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -46,6 +53,33 @@ async function sendOtpEmail(email, otp, firstName) {
     return true;
   } catch (e) {
     console.error('Error sending OTP email:', e.message);
+    return false;
+  }
+}
+
+async function sendResetEmail(email, resetLink, firstName) {
+  const emailUser = process.env.EMAIL_HOST_USER;
+  if (!emailUser) {
+    console.error('ERROR: EMAIL_HOST_USER not configured');
+    return false;
+  }
+  const subject = 'Reset Your HealthTrack+ Password';
+  const text = `Hi ${firstName || 'there'},\n\nClick the link below to reset your password. This link expires in 1 hour.\n\n${resetLink}\n\nIf you did not request a password reset, ignore this email.\n\nHealthTrack+ Team`;
+  const html = `<div style="font-family:sans-serif;max-width:480px;margin:auto">
+    <h2 style="color:#0d9488">Reset Your Password</h2>
+    <p>Hi ${firstName || 'there'},</p>
+    <p>Click the button below to reset your HealthTrack+ password. This link expires in <strong>1 hour</strong>.</p>
+    <a href="${resetLink}" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#0d9488;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Reset Password</a>
+    <p style="color:#64748b;font-size:12px">If the button doesn't work, copy this link:<br/><a href="${resetLink}">${resetLink}</a></p>
+    <p style="color:#64748b;font-size:12px">If you didn't request this, ignore this email.</p>
+  </div>`;
+  try {
+    const transporter = createTransporter();
+    await transporter.sendMail({ from: `"HealthTrack+ (No-Reply)" <${emailUser}>`, to: email, subject, text, html });
+    console.log(`Reset email sent to ${email}`);
+    return true;
+  } catch (e) {
+    console.error('Error sending reset email:', e.message);
     return false;
   }
 }
@@ -207,25 +241,29 @@ router.post('/forgot-password', async (req, res) => {
 
     const user = await promisifyDbGet('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
     if (!user) {
+      // Don't reveal whether email exists
       return res.json({ success: true });
     }
 
-    try {
-      await firebaseAuth.getUserByEmail(email.toLowerCase());
-    } catch (fbErr) {
-      if (fbErr.code === 'auth/user-not-found') {
-        await firebaseAuth.createUser({
-          email: email.toLowerCase(),
-          displayName: user.first_name ? `${user.first_name} ${user.last_name}`.trim() : user.username,
-          emailVerified: true
-        });
-      }
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const { data, error: genError } = await supabaseAdmin.auth.admin.generateLink({
+      type: 'recovery',
+      email: email.toLowerCase(),
+      options: { redirectTo: `${frontendUrl}/reset-password` }
+    });
+
+    if (genError) {
+      console.error('Supabase generateLink error:', genError.message);
+      return res.status(500).json({ success: false, error: 'Failed to generate reset link' });
     }
+
+    const resetLink = data.properties.action_link;
+    await sendResetEmail(email.toLowerCase(), resetLink, user.first_name);
 
     res.json({ success: true });
   } catch (e) {
     console.error('Forgot password error:', e.message);
-    res.json({ success: true });
+    res.status(500).json({ success: false, error: 'Failed to send reset email' });
   }
 });
 
