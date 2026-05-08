@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const { OAuth2Client } = require('google-auth-library');
+const { firebaseAuth } = require('../firebase');
 const { promisifyDbGet, promisifyDbRun, promisifyDbAll } = require('../db');
 const { generateToken } = require('../middleware/auth');
 
@@ -248,6 +249,77 @@ router.post('/google-login', async (req, res) => {
   } catch (e) {
     console.error('Google login error:', e.message);
     res.status(400).json({ success: false, error: 'Google authentication failed' });
+  }
+});
+
+router.post('/verify-email-link', async (req, res) => {
+  try {
+    const { firebase_token, email, username, otp_type } = req.body;
+    if (!firebase_token) {
+      return res.status(400).json({ success: false, error: 'Firebase token is required' });
+    }
+
+    const decodedToken = await firebaseAuth.verifyIdToken(firebase_token);
+    const verifiedEmail = decodedToken.email || email;
+
+    if (otp_type === 'register') {
+      const regData = pendingRegistrations.get(verifiedEmail) || pendingRegistrations.get(email);
+      if (!regData) {
+        return res.status(400).json({ success: false, error: 'Registration data expired. Please register again.' });
+      }
+
+      const hashedPassword = await bcrypt.hash(regData.password, SALT_ROUNDS);
+      const result = await promisifyDbRun(
+        `INSERT INTO users (username, email, password, first_name, last_name, user_type, is_approved, is_email_verified)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+        [regData.username, verifiedEmail, hashedPassword, regData.first_name || '', regData.last_name || '', regData.role || 'patient', regData.role === 'patient' ? 1 : 0]
+      );
+
+      const user = await promisifyDbGet('SELECT * FROM users WHERE id = ?', [result.id]);
+      pendingRegistrations.delete(verifiedEmail);
+      pendingRegistrations.delete(email);
+
+      if (regData.role === 'provider' || regData.role === 'doctor') {
+        await promisifyDbRun(
+          'INSERT INTO service_providers (user_id, provider_type, business_name) VALUES (?, ?, ?)',
+          [user.id, regData.role, regData.username]
+        );
+      }
+
+      const token = generateToken(user);
+      let userRole = user.user_type || 'patient';
+      if (user.is_superuser === 1) userRole = 'admin';
+
+      return res.json({
+        success: true,
+        token,
+        user: { id: user.id, username: user.username, email: user.email, role: userRole }
+      });
+    }
+
+    // Login verification
+    const user = await promisifyDbGet('SELECT * FROM users WHERE email = ?', [verifiedEmail]);
+    if (!user) {
+      return res.status(400).json({ success: false, error: 'User not found' });
+    }
+
+    const token = generateToken(user);
+    let userRole = 'patient';
+    if (user.is_superuser === 1 || user.user_type === 'admin') userRole = 'admin';
+    else if (user.user_type === 'provider') {
+      const provider = await promisifyDbGet('SELECT * FROM service_providers WHERE user_id = ?', [user.id]);
+      if (provider && provider.provider_type === 'doctor') userRole = 'doctor';
+      else userRole = 'provider';
+    }
+
+    res.json({
+      success: true,
+      token,
+      user: { id: user.id, username: user.username, email: user.email, role: userRole }
+    });
+  } catch (e) {
+    console.error('Email link verification error:', e.message);
+    res.status(400).json({ success: false, error: 'Email verification failed. Link may have expired.' });
   }
 });
 
