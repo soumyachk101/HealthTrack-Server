@@ -1,27 +1,32 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const { Pool } = require('pg');
 
-const dbPath = process.env.DATABASE_URL || path.join(__dirname, 'db.sqlite3');
-
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error opening database:', err.message);
-  } else {
-    console.log('Connected to SQLite database.');
-    initDatabase();
-  }
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  max: 5,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000
 });
 
-function initDatabase() {
-  db.serialize(() => {
-    db.run(`CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+pool.on('connect', () => {
+  console.log('Connected to PostgreSQL (Neon).');
+});
+
+pool.on('error', (err) => {
+  console.error('Unexpected PG pool error:', err);
+});
+
+async function initDatabase() {
+  const client = await pool.connect();
+  try {
+    await client.query(`CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
       first_name TEXT DEFAULT '',
       last_name TEXT DEFAULT '',
-      user_type TEXT DEFAULT 'patient' CHECK(user_type IN ('patient','provider','admin')),
+      user_type TEXT DEFAULT 'patient',
       phone TEXT DEFAULT '',
       address TEXT DEFAULT '',
       city TEXT DEFAULT '',
@@ -36,38 +41,37 @@ function initDatabase() {
       is_superuser INTEGER DEFAULT 0,
       is_staff INTEGER DEFAULT 0,
       is_active INTEGER DEFAULT 1,
-      date_joined TEXT DEFAULT CURRENT_TIMESTAMP,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      date_joined TIMESTAMPTZ DEFAULT NOW(),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS service_providers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER UNIQUE NOT NULL,
-      provider_type TEXT DEFAULT 'doctor' CHECK(provider_type IN ('hospital','clinic','pharmacy','lab','doctor')),
+    await client.query(`CREATE TABLE IF NOT EXISTS service_providers (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider_type TEXT DEFAULT 'doctor',
       business_name TEXT NOT NULL,
       license_number TEXT DEFAULT '',
       specialization TEXT DEFAULT '',
       working_hours TEXT DEFAULT '',
       services_offered TEXT DEFAULT '',
       rating REAL DEFAULT 0.0,
-      total_reviews INTEGER DEFAULT 0,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      total_reviews INTEGER DEFAULT 0
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS otps (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+    await client.query(`CREATE TABLE IF NOT EXISTS otps (
+      id SERIAL PRIMARY KEY,
       email TEXT NOT NULL,
       otp_code TEXT NOT NULL,
-      otp_type TEXT DEFAULT 'register' CHECK(otp_type IN ('register','login','password_reset')),
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      otp_type TEXT DEFAULT 'register',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
       is_used INTEGER DEFAULT 0,
-      expires_at TEXT NOT NULL
+      expires_at TIMESTAMPTZ NOT NULL
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS health_records (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
+    await client.query(`CREATE TABLE IF NOT EXISTS health_records (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       blood_pressure_systolic INTEGER,
       blood_pressure_diastolic INTEGER,
       blood_sugar REAL,
@@ -76,29 +80,27 @@ function initDatabase() {
       temperature REAL,
       oxygen_level INTEGER,
       notes TEXT DEFAULT '',
-      recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      recorded_at TIMESTAMPTZ DEFAULT NOW(),
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS medicines (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
+    await client.query(`CREATE TABLE IF NOT EXISTS medicines (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       dosage TEXT NOT NULL,
-      frequency TEXT DEFAULT 'once' CHECK(frequency IN ('once','twice','thrice','asneeded')),
+      frequency TEXT DEFAULT 'once',
       start_date TEXT NOT NULL,
       end_date TEXT,
       prescribed_by TEXT DEFAULT '',
       notes TEXT DEFAULT '',
       is_active INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS prescriptions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
+    await client.query(`CREATE TABLE IF NOT EXISTS prescriptions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       doctor_name TEXT NOT NULL,
       hospital_name TEXT DEFAULT '',
       diagnosis TEXT DEFAULT '',
@@ -106,28 +108,26 @@ function initDatabase() {
       follow_up_date TEXT,
       document TEXT,
       notes TEXT DEFAULT '',
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS mental_health_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      mood_score INTEGER DEFAULT 3 CHECK(mood_score IN (1,2,3,4,5)),
-      stress_level INTEGER DEFAULT 3 CHECK(stress_level IN (1,2,3,4,5)),
+    await client.query(`CREATE TABLE IF NOT EXISTS mental_health_logs (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      mood_score INTEGER DEFAULT 3,
+      stress_level INTEGER DEFAULT 3,
       sleep_hours REAL,
-      sleep_quality INTEGER CHECK(sleep_quality IN (1,2,3,4,5)),
-      anxiety_level INTEGER CHECK(anxiety_level IN (1,2,3,4,5)),
+      sleep_quality INTEGER,
+      anxiety_level INTEGER,
       notes TEXT DEFAULT '',
-      recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      recorded_at TIMESTAMPTZ DEFAULT NOW(),
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS insurance_policies (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      policy_type TEXT DEFAULT 'health' CHECK(policy_type IN ('health','life','term')),
+    await client.query(`CREATE TABLE IF NOT EXISTS insurance_policies (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      policy_type TEXT DEFAULT 'health',
       provider_name TEXT NOT NULL,
       policy_number TEXT NOT NULL,
       coverage_amount REAL NOT NULL,
@@ -136,13 +136,12 @@ function initDatabase() {
       end_date TEXT NOT NULL,
       document TEXT,
       is_active INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS lifestyle_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
+    await client.query(`CREATE TABLE IF NOT EXISTS lifestyle_logs (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       water_intake INTEGER DEFAULT 0,
       exercise_minutes INTEGER DEFAULT 0,
       steps_count INTEGER DEFAULT 0,
@@ -151,123 +150,113 @@ function initDatabase() {
       smoking_count INTEGER DEFAULT 0,
       alcohol_units INTEGER DEFAULT 0,
       notes TEXT DEFAULT '',
-      recorded_at TEXT DEFAULT CURRENT_DATE,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      recorded_at DATE DEFAULT CURRENT_DATE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(user_id, recorded_at)
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS activity_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      action TEXT DEFAULT 'login' CHECK(action IN ('login','logout','record_added','medicine_added','prescription_added','profile_updated','registration','appointment_booked','service_requested','admin_action')),
+    await client.query(`CREATE TABLE IF NOT EXISTS activity_logs (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      action TEXT DEFAULT 'login',
       details TEXT DEFAULT '',
       ip_address TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS system_settings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+    await client.query(`CREATE TABLE IF NOT EXISTS system_settings (
+      id SERIAL PRIMARY KEY,
       key TEXT UNIQUE NOT NULL,
       value TEXT NOT NULL,
       description TEXT DEFAULT '',
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS appointments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      patient_id INTEGER NOT NULL,
-      doctor_id INTEGER NOT NULL,
+    await client.query(`CREATE TABLE IF NOT EXISTS appointments (
+      id SERIAL PRIMARY KEY,
+      patient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      doctor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       date TEXT NOT NULL,
       time TEXT NOT NULL,
       reason TEXT NOT NULL,
-      status TEXT DEFAULT 'pending' CHECK(status IN ('pending','confirmed','completed','cancelled')),
+      status TEXT DEFAULT 'pending',
       type TEXT DEFAULT 'Video Consult',
       meeting_link TEXT,
       notes TEXT DEFAULT '',
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (patient_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (doctor_id) REFERENCES users(id) ON DELETE CASCADE
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS services (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      provider_id INTEGER NOT NULL,
+    await client.query(`CREATE TABLE IF NOT EXISTS services (
+      id SERIAL PRIMARY KEY,
+      provider_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       description TEXT NOT NULL,
       price REAL NOT NULL,
       duration_minutes INTEGER DEFAULT 60,
-      is_active INTEGER DEFAULT 1,
-      FOREIGN KEY (provider_id) REFERENCES users(id) ON DELETE CASCADE
+      is_active INTEGER DEFAULT 1
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS service_requests (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      patient_id INTEGER NOT NULL,
-      provider_id INTEGER NOT NULL,
+    await client.query(`CREATE TABLE IF NOT EXISTS service_requests (
+      id SERIAL PRIMARY KEY,
+      patient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       service_name TEXT NOT NULL,
       service_price REAL NOT NULL,
       address TEXT NOT NULL,
       scheduled_date TEXT,
       items TEXT DEFAULT '',
-      status TEXT DEFAULT 'pending' CHECK(status IN ('pending','accepted','completed','declined','cancelled')),
+      status TEXT DEFAULT 'pending',
       notes TEXT DEFAULT '',
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (patient_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (provider_id) REFERENCES users(id) ON DELETE CASCADE
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    db.run(`CREATE INDEX IF NOT EXISTS idx_health_records_user ON health_records(user_id)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_medicines_user ON medicines(user_id)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_prescriptions_user ON prescriptions(user_id)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_activity_logs_user ON activity_logs(user_id)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_otps_email ON otps(email)`);
-  });
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_health_records_user ON health_records(user_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_medicines_user ON medicines(user_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_prescriptions_user ON prescriptions(user_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_activity_logs_user ON activity_logs(user_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_otps_email ON otps(email)`);
+
+    console.log('Database tables initialized.');
+  } finally {
+    client.release();
+  }
 }
 
-function promisifyDb(method) {
-  return function(sql, params = []) {
-    return new Promise((resolve, reject) => {
-      db[method](sql, params, function(err, result) {
-        if (err) reject(err);
-        else resolve(result);
-      });
-    });
-  };
+// SQLite-compatible wrapper functions using $1, $2 style params
+// Convert ? placeholders to $1, $2, etc.
+function convertPlaceholders(sql) {
+  let i = 0;
+  return sql.replace(/\?/g, () => `$${++i}`);
 }
 
-function promisifyDbRun(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function(err) {
-      if (err) reject(err);
-      else resolve({ id: this.lastID, changes: this.changes });
-    });
-  });
+async function promisifyDbRun(sql, params = []) {
+  const pgSql = convertPlaceholders(sql);
+  const isInsert = sql.trim().toUpperCase().startsWith('INSERT');
+  const finalSql = isInsert && !pgSql.toUpperCase().includes('RETURNING') ? pgSql + ' RETURNING *' : pgSql;
+  const result = await pool.query(finalSql, params);
+  const row = result.rows ? result.rows[0] : null;
+  return { id: row ? row.id : null, changes: result.rowCount };
 }
 
-function promisifyDbAll(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
-    });
-  });
+async function promisifyDbAll(sql, params = []) {
+  const pgSql = convertPlaceholders(sql);
+  const result = await pool.query(pgSql, params);
+  return result.rows;
 }
 
-function promisifyDbGet(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
+async function promisifyDbGet(sql, params = []) {
+  const pgSql = convertPlaceholders(sql);
+  const result = await pool.query(pgSql, params);
+  return result.rows[0] || null;
 }
+
+// Initialize on first import
+initDatabase().catch(err => console.error('DB init error:', err));
 
 module.exports = {
-  db,
+  pool,
   promisifyDbRun,
   promisifyDbAll,
   promisifyDbGet,
