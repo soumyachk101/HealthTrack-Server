@@ -313,14 +313,16 @@ router.post('/forgot-password', async (req, res) => {
     const inferredUrl = forwardedProto && forwardedHost ? `${forwardedProto}://${forwardedHost}` : null;
     const frontendUrl =
       process.env.FRONTEND_URL ||
-      inferredUrl ||
       origin ||
+      inferredUrl ||
       'https://healthtrack.store';
+    const redirectTo = `${frontendUrl}/reset-password`;
+    console.log('Forgot-password redirectTo:', redirectTo);
     const { data, error: genError } = await generateRecoveryLink(
       supabase,
       normalizedEmail,
       user,
-      `${frontendUrl}/reset-password`
+      redirectTo
     );
 
     if (genError) {
