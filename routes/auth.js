@@ -94,19 +94,10 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Username or email already exists' });
     }
 
-    // Store pending registration
+    // Store pending registration - Firebase email link will handle verification
     pendingRegistrations.set(email, { username, email, password, first_name, last_name, role, provider_type, business_name, license_number, specialization, state });
 
-    // Generate OTP
-    const otp = generateOtp();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    await promisifyDbRun(
-      'INSERT INTO otps (email, otp_code, otp_type, expires_at) VALUES (?, ?, ?, ?)',
-      [email, otp, 'register', expiresAt]
-    );
-    await sendOtpEmail(email, otp, first_name);
-
-    res.json({ success: true, otp_required: true, message: 'Verification code sent to your email' });
+    res.json({ success: true, otp_required: true, email, username, message: 'Please verify your email to complete registration' });
   } catch (e) {
     res.status(400).json({ success: false, error: e.message });
   }
