@@ -65,16 +65,21 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Invalid credentials' });
     }
 
-    // Generate OTP
-    const otp = generateOtp();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    await promisifyDbRun(
-      'INSERT INTO otps (email, otp_code, otp_type, expires_at) VALUES (?, ?, ?, ?)',
-      [user.email, otp, 'login', expiresAt]
-    );
-    await sendOtpEmail(user.email, otp, user.first_name);
+    const token = generateToken(user);
 
-    res.json({ success: true, otp_required: true, email: user.email, username: user.username, message: 'Verification code sent to your email' });
+    let userRole = 'patient';
+    if (user.is_superuser === 1 || user.user_type === 'admin') userRole = 'admin';
+    else if (user.user_type === 'provider') {
+      const provider = await promisifyDbGet('SELECT * FROM service_providers WHERE user_id = ?', [user.id]);
+      if (provider && provider.provider_type === 'doctor') userRole = 'doctor';
+      else userRole = 'provider';
+    }
+
+    res.json({
+      success: true,
+      token,
+      user: { id: user.id, username: user.username, email: user.email, role: userRole }
+    });
   } catch (e) {
     res.status(400).json({ success: false, error: e.message });
   }
