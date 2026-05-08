@@ -1,5 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const { createClient } = require('@supabase/supabase-js');
 const { OAuth2Client } = require('google-auth-library');
@@ -97,6 +98,45 @@ async function sendResetEmail(email, resetLink, firstName) {
     console.error('Error sending reset email:', e.message);
     return false;
   }
+}
+
+async function generateRecoveryLink(supabase, email, user, redirectTo) {
+  const linkOptions = {
+    type: 'recovery',
+    email,
+    options: { redirectTo }
+  };
+
+  let result = await supabase.auth.admin.generateLink(linkOptions);
+  if (!result.error) {
+    return result;
+  }
+
+  const message = result.error.message || '';
+  const status = result.error.status || result.error.statusCode;
+  const shouldCreateAuthUser = status === 404 || /user.*not.*found/i.test(message);
+
+  if (!shouldCreateAuthUser) {
+    return result;
+  }
+
+  const temporaryPassword = crypto.randomBytes(32).toString('hex');
+  const displayName = user.first_name
+    ? `${user.first_name} ${user.last_name || ''}`.trim()
+    : user.username;
+
+  const { error: createError } = await supabase.auth.admin.createUser({
+    email,
+    password: temporaryPassword,
+    email_confirm: true,
+    user_metadata: { display_name: displayName }
+  });
+
+  if (createError && !/already.*registered|already.*exists/i.test(createError.message || '')) {
+    return { data: null, error: createError };
+  }
+
+  return supabase.auth.admin.generateLink(linkOptions);
 }
 
 // Store pending registration in memory (use Redis/DB in production)
@@ -266,20 +306,25 @@ router.post('/forgot-password', async (req, res) => {
       return res.status(500).json({ success: false, error: 'Password reset is not configured' });
     }
 
+    const normalizedEmail = email.toLowerCase();
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const { data, error: genError } = await supabase.auth.admin.generateLink({
-      type: 'recovery',
-      email: email.toLowerCase(),
-      options: { redirectTo: `${frontendUrl}/reset-password` }
-    });
+    const { data, error: genError } = await generateRecoveryLink(
+      supabase,
+      normalizedEmail,
+      user,
+      `${frontendUrl}/reset-password`
+    );
 
     if (genError) {
-      console.error('Supabase generateLink error:', genError.message);
+      console.error('Supabase generateLink error:', genError.message, genError.status || genError.statusCode || '');
       return res.status(500).json({ success: false, error: 'Failed to generate reset link' });
     }
 
     const resetLink = data.properties.action_link;
-    await sendResetEmail(email.toLowerCase(), resetLink, user.first_name);
+    const emailSent = await sendResetEmail(normalizedEmail, resetLink, user.first_name);
+    if (!emailSent) {
+      return res.status(500).json({ success: false, error: 'Failed to send reset email' });
+    }
 
     res.json({ success: true });
   } catch (e) {
