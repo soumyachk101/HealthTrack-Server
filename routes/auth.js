@@ -8,25 +8,14 @@ const router = express.Router();
 
 const SALT_ROUNDS = 10;
 
-let _transporter = null;
-function getTransporter() {
-  if (!_transporter) {
-    _transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-      port: parseInt(process.env.EMAIL_PORT || '587'),
-      secure: false,
-      pool: true,
-      maxConnections: 1,
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-      auth: {
-        user: process.env.EMAIL_HOST_USER || '',
-        pass: process.env.EMAIL_HOST_PASSWORD || ''
-      }
-    });
-  }
-  return _transporter;
+function createTransporter() {
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_HOST_USER || '',
+      pass: process.env.EMAIL_HOST_PASSWORD || ''
+    }
+  });
 }
 
 function generateOtp() {
@@ -46,11 +35,12 @@ async function sendOtpEmail(email, otp, firstName) {
   const text = `Hi ${firstName || 'there'},\n\nYour verification code for HealthTrack+ is:\n\n    ${otp}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this code, please ignore this email.\n\nBest regards,\nThe HealthTrack+ Team`;
 
   try {
-    await getTransporter().sendMail({ from: fromEmail, to: email, subject, text });
+    const transporter = createTransporter();
+    await transporter.sendMail({ from: fromEmail, to: email, subject, text });
     console.log(`Email sent successfully to ${email}`);
     return true;
   } catch (e) {
-    console.error('Error sending OTP email:', e);
+    console.error('Error sending OTP email:', e.message);
     return false;
   }
 }
@@ -77,7 +67,7 @@ router.post('/login', async (req, res) => {
       'INSERT INTO otps (email, otp_code, otp_type, expires_at) VALUES (?, ?, ?, ?)',
       [user.email, otp, 'login', expiresAt]
     );
-    sendOtpEmail(user.email, otp, user.first_name);
+    await sendOtpEmail(user.email, otp, user.first_name);
 
     res.json({ success: true, otp_required: true, email: user.email, username: user.username, message: 'Verification code sent to your email' });
   } catch (e) {
@@ -104,7 +94,7 @@ router.post('/register', async (req, res) => {
       'INSERT INTO otps (email, otp_code, otp_type, expires_at) VALUES (?, ?, ?, ?)',
       [email, otp, 'register', expiresAt]
     );
-    sendOtpEmail(email, otp, first_name);
+    await sendOtpEmail(email, otp, first_name);
 
     res.json({ success: true, otp_required: true, message: 'Verification code sent to your email' });
   } catch (e) {
@@ -199,7 +189,7 @@ router.post('/resend-otp', async (req, res) => {
       'INSERT INTO otps (email, otp_code, otp_type, expires_at) VALUES (?, ?, ?, ?)',
       [email, otp, otp_type || 'register', expiresAt]
     );
-    sendOtpEmail(email, otp, first_name);
+    await sendOtpEmail(email, otp, first_name);
 
     res.json({ success: true, message: 'A new verification code has been sent to your email' });
   } catch (e) {
