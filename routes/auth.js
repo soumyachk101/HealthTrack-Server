@@ -2,32 +2,10 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
-const { createClient } = require('@supabase/supabase-js');
 const { OAuth2Client } = require('google-auth-library');
 const { firebaseAuth } = require('../firebase');
 const { promisifyDbGet, promisifyDbRun, promisifyDbAll } = require('../db');
 const { generateToken } = require('../middleware/auth');
-
-let supabaseAdmin;
-
-function getSupabaseAdmin() {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    return null;
-  }
-
-  if (!supabaseAdmin) {
-    supabaseAdmin = createClient(
-      supabaseUrl,
-      serviceRoleKey,
-      { auth: { autoRefreshToken: false, persistSession: false } }
-    );
-  }
-
-  return supabaseAdmin;
-}
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -100,24 +78,13 @@ async function sendResetEmail(email, resetLink, firstName) {
   }
 }
 
-async function generateRecoveryLink(supabase, email, user, redirectTo) {
-  const linkOptions = {
-    type: 'recovery',
-    email,
-    options: { redirectTo }
-  };
-
-  let result = await supabase.auth.admin.generateLink(linkOptions);
-  if (!result.error) {
-    return result;
-  }
-
-  const message = result.error.message || '';
-  const status = result.error.status || result.error.statusCode;
-  const shouldCreateAuthUser = status === 404 || /user.*not.*found/i.test(message);
-
-  if (!shouldCreateAuthUser) {
-    return result;
+async function ensureFirebaseUser(email, user) {
+  try {
+    return await firebaseAuth.getUserByEmail(email);
+  } catch (err) {
+    if (err.code !== 'auth/user-not-found') {
+      throw err;
+    }
   }
 
   const temporaryPassword = crypto.randomBytes(32).toString('hex');
@@ -125,18 +92,32 @@ async function generateRecoveryLink(supabase, email, user, redirectTo) {
     ? `${user.first_name} ${user.last_name || ''}`.trim()
     : user.username;
 
-  const { error: createError } = await supabase.auth.admin.createUser({
+  return firebaseAuth.createUser({
     email,
     password: temporaryPassword,
-    email_confirm: true,
-    user_metadata: { display_name: displayName }
+    displayName,
+    emailVerified: true
   });
+}
 
-  if (createError && !/already.*registered|already.*exists/i.test(createError.message || '')) {
-    return { data: null, error: createError };
+function toAppResetLink(firebaseLink, frontendUrl) {
+  try {
+    const url = new URL(firebaseLink);
+    const oobCode = url.searchParams.get('oobCode');
+    const apiKey = url.searchParams.get('apiKey');
+
+    if (!oobCode) {
+      return firebaseLink;
+    }
+
+    const appUrl = new URL('/reset-password', frontendUrl);
+    appUrl.searchParams.set('mode', 'resetPassword');
+    appUrl.searchParams.set('oobCode', oobCode);
+    if (apiKey) appUrl.searchParams.set('apiKey', apiKey);
+    return appUrl.toString();
+  } catch (err) {
+    return firebaseLink;
   }
-
-  return supabase.auth.admin.generateLink(linkOptions);
 }
 
 // Store pending registration in memory (use Redis/DB in production)
@@ -300,12 +281,6 @@ router.post('/forgot-password', async (req, res) => {
       return res.json({ success: true });
     }
 
-    const supabase = getSupabaseAdmin();
-    if (!supabase) {
-      console.error('Supabase admin env is not configured');
-      return res.status(500).json({ success: false, error: 'Password reset is not configured' });
-    }
-
     const normalizedEmail = email.toLowerCase();
     const origin = req.get('origin');
     const forwardedProto = (req.headers['x-forwarded-proto'] || '').toString();
@@ -316,25 +291,15 @@ router.post('/forgot-password', async (req, res) => {
       origin ||
       inferredUrl ||
       'https://healthtrack.store';
-    const redirectTo = `${frontendUrl}/reset-password`;
-    console.log('Forgot-password redirectTo:', redirectTo);
-    const { data, error: genError } = await generateRecoveryLink(
-      supabase,
-      normalizedEmail,
-      user,
-      redirectTo
-    );
+    console.log('Forgot-password frontendUrl:', frontendUrl);
 
-    if (genError) {
-      console.error('Supabase generateLink error:', {
-        message: genError.message,
-        status: genError.status || genError.statusCode,
-        name: genError.name
-      });
-      return res.status(500).json({ success: false, error: 'Failed to generate reset link' });
-    }
+    await ensureFirebaseUser(normalizedEmail, user);
 
-    const resetLink = data.properties.action_link;
+    const firebaseResetLink = await firebaseAuth.generatePasswordResetLink(normalizedEmail, {
+      url: `${frontendUrl}/reset-password`,
+      handleCodeInApp: true
+    });
+    const resetLink = toAppResetLink(firebaseResetLink, frontendUrl);
     const emailSent = await sendResetEmail(normalizedEmail, resetLink, user.first_name);
     if (!emailSent) {
       return res.status(500).json({ success: false, error: 'Failed to send reset email' });
@@ -421,13 +386,11 @@ router.post('/google-login', async (req, res) => {
 
 router.post('/verify-email-link', async (req, res) => {
   try {
-    const { firebase_token, email, username, otp_type, supabase_verified } = req.body;
+    const { firebase_token, email, username, otp_type } = req.body;
 
     let verifiedEmail = email;
 
-    if (supabase_verified) {
-      verifiedEmail = email;
-    } else if (firebase_token) {
+    if (firebase_token) {
       const decodedToken = await firebaseAuth.verifyIdToken(firebase_token);
       verifiedEmail = decodedToken.email || email;
     } else {
