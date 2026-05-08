@@ -9,6 +9,17 @@
   "routes": [
     {
       "src": "/(.*)",
+      "methods": ["OPTIONS"],
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+        "Access-Control-Allow-Headers": "Accept,Accept-Encoding,Authorization,Content-Type,DNT,Origin,User-Agent,X-Requested-With",
+        "Access-Control-Allow-Credentials": "true"
+      },
+      "continue": true
+    },
+    {
+      "src": "/(.*)",
       "dest": "server.js"
     }
   ]

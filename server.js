@@ -21,7 +21,9 @@ app.use((req, res, next) => {
 const corsOrigins = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173').split(',').map(s => s.trim());
 app.use(cors({
   origin: function(origin, callback) {
-    if (!origin || corsOrigins.includes(origin) || corsOrigins.includes('*') || origin.endsWith('.vercel.app') || origin.endsWith('.netlify.app')) {
+    if (!origin || corsOrigins.includes(origin) || corsOrigins.includes('*') ||
+        origin.endsWith('.vercel.app') || origin.endsWith('.netlify.app') ||
+        origin.endsWith('.healthtrack.store') || origin === 'https://healthtrack.store') {
       callback(null, true);
     } else {
       callback(null, false);
@@ -31,6 +33,9 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Accept', 'Accept-Encoding', 'Authorization', 'Content-Type', 'DNT', 'Origin', 'User-Agent', 'X-Requested-With']
 }));
+
+// Handle preflight for all routes
+app.options('*', cors());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
