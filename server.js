@@ -43,6 +43,10 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+app.get('/', (req, res) => {
+  res.json({ message: 'HealthTrack+ API Server is Running' });
+});
+
 // Routes
 app.use('/accounts/api', require('./routes/auth'));
 app.use('/api', require('./routes/core'));
