@@ -18,7 +18,7 @@ app.use((req, res, next) => {
 });
 
 // CORS setup
-const corsOrigins = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173').split(',').map(s => s.trim());
+const corsOrigins = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000').split(',').map(s => s.trim());
 app.use(cors({
   origin: function(origin, callback) {
     if (!origin || corsOrigins.includes(origin) || corsOrigins.includes('*') ||
