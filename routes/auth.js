@@ -7,11 +7,26 @@ const { firebaseAuth } = require('../firebase');
 const { promisifyDbGet, promisifyDbRun, promisifyDbAll } = require('../db');
 const { generateToken } = require('../middleware/auth');
 
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || '',
-  { auth: { autoRefreshToken: false, persistSession: false } }
-);
+let supabaseAdmin;
+
+function getSupabaseAdmin() {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return null;
+  }
+
+  if (!supabaseAdmin) {
+    supabaseAdmin = createClient(
+      supabaseUrl,
+      serviceRoleKey,
+      { auth: { autoRefreshToken: false, persistSession: false } }
+    );
+  }
+
+  return supabaseAdmin;
+}
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -245,8 +260,14 @@ router.post('/forgot-password', async (req, res) => {
       return res.json({ success: true });
     }
 
+    const supabase = getSupabaseAdmin();
+    if (!supabase) {
+      console.error('Supabase admin env is not configured');
+      return res.status(500).json({ success: false, error: 'Password reset is not configured' });
+    }
+
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const { data, error: genError } = await supabaseAdmin.auth.admin.generateLink({
+    const { data, error: genError } = await supabase.auth.admin.generateLink({
       type: 'recovery',
       email: email.toLowerCase(),
       options: { redirectTo: `${frontendUrl}/reset-password` }
