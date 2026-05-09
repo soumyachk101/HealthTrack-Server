@@ -142,6 +142,15 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Invalid credentials' });
     }
 
+    if (user.is_email_verified === 0) {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Email not verified', 
+        email: user.email,
+        requires_verification: true 
+      });
+    }
+
     const token = generateToken(user);
 
     let userRole = 'patient';
@@ -172,6 +181,30 @@ router.post('/register', async (req, res) => {
     }
 
     const normalizedEmail = email.toLowerCase();
+    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+    
+    // Determine user type and approval status
+    const userType = ['doctor', 'provider'].includes(role) ? 'provider' : 'patient';
+    const isApproved = role === 'patient' ? 1 : 0;
+
+    // Create user in DB with is_email_verified = 0
+    const result = await promisifyDbRun(
+      `INSERT INTO users (username, email, password, first_name, last_name, user_type, is_approved, is_email_verified, city)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      [username, normalizedEmail, hashedPassword, first_name || '', last_name || '', userType, isApproved, state || '']
+    );
+
+    const userId = result.id;
+
+    // If doctor/provider, create service provider record (initially inactive/unverified)
+    if (['doctor', 'provider'].includes(role)) {
+      await promisifyDbRun(
+        `INSERT INTO service_providers (user_id, provider_type, business_name, license_number, specialization, city)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [userId, provider_type || (role === 'doctor' ? 'doctor' : 'pharmacy'), business_name || `${first_name} ${last_name}`, license_number || '', specialization || '', state || '']
+      );
+    }
+
     const origin = req.get('origin');
     const forwardedProto = (req.headers['x-forwarded-proto'] || '').toString();
     const forwardedHost = (req.headers['x-forwarded-host'] || '').toString();
@@ -181,9 +214,6 @@ router.post('/register', async (req, res) => {
       origin ||
       inferredUrl ||
       'https://healthtrack.store';
-
-    // Store pending registration
-    pendingRegistrations.set(normalizedEmail, { username, email: normalizedEmail, password, first_name, last_name, role, provider_type, business_name, license_number, specialization, state });
 
     const otp = generateOtp();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
@@ -196,7 +226,13 @@ router.post('/register', async (req, res) => {
     const emailSent = await sendVerificationLinkEmail(normalizedEmail, verificationLink, first_name);
     
     if (!emailSent) {
-      return res.status(500).json({ success: false, error: 'Failed to send verification email. Please check server configuration.' });
+      // We still return success because the user IS created, but warn about email
+      return res.json({ 
+        success: true, 
+        email: normalizedEmail, 
+        username, 
+        message: 'Account created but failed to send verification email. Please try resending from login page.' 
+      });
     }
 
     res.json({ success: true, email: normalizedEmail, username, message: 'Please check your email for the verification link' });
@@ -223,32 +259,16 @@ router.post('/verify-otp', async (req, res) => {
 
     let user;
     if (otp_type === 'register' || otp_type === 'password_reset') {
-      const regData = pendingRegistrations.get(email);
-      if (!regData) {
-        return res.status(400).json({ success: false, error: 'Registration session expired' });
+      user = await promisifyDbGet('SELECT * FROM users WHERE email = ?', [email]);
+      if (!user) {
+        return res.status(400).json({ success: false, error: 'User not found' });
       }
-      pendingRegistrations.delete(email);
 
-      const hashedPassword = await bcrypt.hash(regData.password, SALT_ROUNDS);
-      const role = regData.role || 'patient';
-      const userType = ['doctor', 'provider'].includes(role) ? 'provider' : 'patient';
-      const isApproved = role === 'patient' ? 1 : 0;
-
-      const result = await promisifyDbRun(
-        `INSERT INTO users (username, email, password, first_name, last_name, user_type, is_approved, is_email_verified, city)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
-        [regData.username, regData.email, hashedPassword, regData.first_name || '', regData.last_name || '', userType, isApproved, regData.state || '']
-      );
-
-      user = await promisifyDbGet('SELECT * FROM users WHERE id = ?', [result.id]);
-
-      if (['doctor', 'provider'].includes(role)) {
-        await promisifyDbRun(
-          `INSERT INTO service_providers (user_id, provider_type, business_name, license_number, specialization, city)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [user.id, regData.provider_type || (role === 'doctor' ? 'doctor' : 'pharmacy'), regData.business_name || `${user.first_name} ${user.last_name}`, regData.license_number || regData.registration_number || '', regData.specialization || '', regData.state || '']
-        );
-      }
+      // Mark email as verified
+      await promisifyDbRun('UPDATE users SET is_email_verified = 1 WHERE id = ?', [user.id]);
+      
+      // Update local user object
+      user.is_email_verified = 1;
     } else {
       // login
       const lookup = username || email;
