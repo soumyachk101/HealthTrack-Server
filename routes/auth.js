@@ -120,6 +120,33 @@ function toAppResetLink(firebaseLink, frontendUrl) {
   }
 }
 
+async function sendVerificationLinkEmail(email, verificationLink, firstName) {
+  const emailUser = process.env.EMAIL_HOST_USER;
+  if (!emailUser) {
+    console.error('ERROR: EMAIL_HOST_USER not configured');
+    return false;
+  }
+  const subject = 'Verify Your HealthTrack+ Email';
+  const text = `Hi ${firstName || 'there'},\n\nClick the link below to verify your email and complete your registration. This link expires in 10 minutes.\n\n${verificationLink}\n\nIf you did not create an account, ignore this email.\n\nHealthTrack+ Team`;
+  const html = `<div style="font-family:sans-serif;max-width:480px;margin:auto">
+    <h2 style="color:#0d9488">Verify Your Email</h2>
+    <p>Hi ${firstName || 'there'},</p>
+    <p>Click the button below to verify your email and activate your HealthTrack+ account. This link expires in <strong>10 minutes</strong>.</p>
+    <a href="${verificationLink}" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#0d9488;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Verify Email</a>
+    <p style="color:#64748b;font-size:12px">If the button doesn't work, copy this link:<br/><a href="${verificationLink}">${verificationLink}</a></p>
+    <p style="color:#64748b;font-size:12px">If you didn't create an account, ignore this email.</p>
+  </div>`;
+  try {
+    const transporter = createTransporter();
+    await transporter.sendMail({ from: `"HealthTrack+ (No-Reply)" <${emailUser}>`, to: email, subject, text, html });
+    console.log(`Verification email sent to ${email}`);
+    return true;
+  } catch (e) {
+    console.error('Error sending verification email:', e.message);
+    return false;
+  }
+}
+
 // Store pending registration in memory (use Redis/DB in production)
 const pendingRegistrations = new Map();
 
@@ -139,9 +166,9 @@ router.post('/login', async (req, res) => {
 
     let userRole = 'patient';
     if (user.is_superuser === 1 || user.user_type === 'admin') userRole = 'admin';
-    else if (user.user_type === 'provider') {
+    else if (user.user_type === 'provider' || user.user_type === 'doctor') {
       const provider = await promisifyDbGet('SELECT * FROM service_providers WHERE user_id = ?', [user.id]);
-      if (provider && provider.provider_type === 'doctor') userRole = 'doctor';
+      if (user.user_type === 'doctor' || (provider && provider.provider_type === 'doctor')) userRole = 'doctor';
       else userRole = 'provider';
     }
 
@@ -164,10 +191,35 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Username or email already exists' });
     }
 
-    // Store pending registration - Firebase email link will handle verification
-    pendingRegistrations.set(email, { username, email, password, first_name, last_name, role, provider_type, business_name, license_number, specialization, state });
+    const normalizedEmail = email.toLowerCase();
+    const origin = req.get('origin');
+    const forwardedProto = (req.headers['x-forwarded-proto'] || '').toString();
+    const forwardedHost = (req.headers['x-forwarded-host'] || '').toString();
+    const inferredUrl = forwardedProto && forwardedHost ? `${forwardedProto}://${forwardedHost}` : null;
+    const frontendUrl =
+      process.env.FRONTEND_URL ||
+      origin ||
+      inferredUrl ||
+      'https://healthtrack.store';
 
-    res.json({ success: true, otp_required: true, email, username, message: 'Please verify your email to complete registration' });
+    // Store pending registration
+    pendingRegistrations.set(normalizedEmail, { username, email: normalizedEmail, password, first_name, last_name, role, provider_type, business_name, license_number, specialization, state });
+
+    const otp = generateOtp();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    await promisifyDbRun(
+      'INSERT INTO otps (email, otp_code, otp_type, expires_at) VALUES (?, ?, ?, ?)',
+      [normalizedEmail, otp, 'register', expiresAt]
+    );
+
+    const verificationLink = `${frontendUrl}/verify-email?otp=${otp}&email=${encodeURIComponent(normalizedEmail)}`;
+    const emailSent = await sendVerificationLinkEmail(normalizedEmail, verificationLink, first_name);
+    
+    if (!emailSent) {
+      return res.status(500).json({ success: false, error: 'Failed to send verification email. Please check server configuration.' });
+    }
+
+    res.json({ success: true, email: normalizedEmail, username, message: 'Please check your email for the verification link' });
   } catch (e) {
     res.status(400).json({ success: false, error: e.message });
   }
@@ -231,9 +283,9 @@ router.post('/verify-otp', async (req, res) => {
 
     let userRole = 'patient';
     if (user.is_superuser === 1 || user.user_type === 'admin') userRole = 'admin';
-    else if (user.user_type === 'provider') {
+    else if (user.user_type === 'provider' || user.user_type === 'doctor') {
       const provider = await promisifyDbGet('SELECT * FROM service_providers WHERE user_id = ?', [user.id]);
-      if (provider && provider.provider_type === 'doctor') userRole = 'doctor';
+      if (user.user_type === 'doctor' || (provider && provider.provider_type === 'doctor')) userRole = 'doctor';
       else userRole = 'provider';
     }
 
@@ -336,7 +388,7 @@ router.post('/update-password', async (req, res) => {
 
 router.post('/google-login', async (req, res) => {
   try {
-    const { credential } = req.body;
+    const { credential, role } = req.body;
     if (!credential) {
       return res.status(400).json({ success: false, error: 'Google credential is required' });
     }
@@ -355,21 +407,33 @@ router.post('/google-login', async (req, res) => {
       const randomPassword = require('crypto').randomBytes(32).toString('hex');
       const hashedPassword = await bcrypt.hash(randomPassword, SALT_ROUNDS);
 
+      const requestedRole = role || 'patient';
+      const userType = ['doctor', 'provider'].includes(requestedRole) ? 'provider' : 'patient';
+      const isApproved = requestedRole === 'patient' ? 1 : 0;
+
       const result = await promisifyDbRun(
         `INSERT INTO users (username, email, password, first_name, last_name, user_type, is_approved, is_email_verified, profile_image)
-         VALUES (?, ?, ?, ?, ?, 'patient', 1, 1, ?)`,
-        [username, email, hashedPassword, given_name || '', family_name || '', picture || '']
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+        [username, email, hashedPassword, given_name || '', family_name || '', userType, isApproved, picture || '']
       );
       user = await promisifyDbGet('SELECT * FROM users WHERE id = ?', [result.id]);
+
+      if (['doctor', 'provider'].includes(requestedRole)) {
+        const providerType = requestedRole === 'doctor' ? 'doctor' : 'pharmacy';
+        await promisifyDbRun(
+          `INSERT INTO service_providers (user_id, provider_type, business_name) VALUES (?, ?, ?)`,
+          [user.id, providerType, given_name || username]
+        );
+      }
     }
 
     const token = generateToken(user);
 
     let userRole = 'patient';
     if (user.is_superuser === 1 || user.user_type === 'admin') userRole = 'admin';
-    else if (user.user_type === 'provider') {
+    else if (user.user_type === 'provider' || user.user_type === 'doctor') {
       const provider = await promisifyDbGet('SELECT * FROM service_providers WHERE user_id = ?', [user.id]);
-      if (provider && provider.provider_type === 'doctor') userRole = 'doctor';
+      if (user.user_type === 'doctor' || (provider && provider.provider_type === 'doctor')) userRole = 'doctor';
       else userRole = 'provider';
     }
 
@@ -404,10 +468,13 @@ router.post('/verify-email-link', async (req, res) => {
       }
 
       const hashedPassword = await bcrypt.hash(regData.password, SALT_ROUNDS);
+      const userType = ['doctor', 'provider'].includes(regData.role) ? 'provider' : 'patient';
+      const isApproved = regData.role === 'patient' ? 1 : 0;
+
       const result = await promisifyDbRun(
         `INSERT INTO users (username, email, password, first_name, last_name, user_type, is_approved, is_email_verified)
          VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
-        [regData.username, verifiedEmail, hashedPassword, regData.first_name || '', regData.last_name || '', regData.role || 'patient', regData.role === 'patient' ? 1 : 0]
+        [regData.username, verifiedEmail, hashedPassword, regData.first_name || '', regData.last_name || '', userType, isApproved]
       );
 
       const user = await promisifyDbGet('SELECT * FROM users WHERE id = ?', [result.id]);
@@ -441,9 +508,9 @@ router.post('/verify-email-link', async (req, res) => {
     const token = generateToken(user);
     let userRole = 'patient';
     if (user.is_superuser === 1 || user.user_type === 'admin') userRole = 'admin';
-    else if (user.user_type === 'provider') {
+    else if (user.user_type === 'provider' || user.user_type === 'doctor') {
       const provider = await promisifyDbGet('SELECT * FROM service_providers WHERE user_id = ?', [user.id]);
-      if (provider && provider.provider_type === 'doctor') userRole = 'doctor';
+      if (user.user_type === 'doctor' || (provider && provider.provider_type === 'doctor')) userRole = 'doctor';
       else userRole = 'provider';
     }
 
