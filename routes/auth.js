@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const { OAuth2Client } = require('google-auth-library');
-const { firebaseAuth } = require('../firebase');
+
 const { promisifyDbGet, promisifyDbRun, promisifyDbAll } = require('../db');
 const { generateToken } = require('../middleware/auth');
 
@@ -14,11 +14,18 @@ const router = express.Router();
 const SALT_ROUNDS = 10;
 
 function createTransporter() {
+  const host = process.env.EMAIL_HOST || 'smtp.gmail.com';
+  const port = parseInt(process.env.EMAIL_PORT || '587');
+  // For port 587, secure should be false (it uses STARTTLS). For 465, secure should be true.
+  const secure = port === 465;
+  
   return nodemailer.createTransport({
-    service: 'gmail',
+    host,
+    port,
+    secure: process.env.EMAIL_USE_TLS === 'true' ? false : secure,
     auth: {
-      user: process.env.EMAIL_HOST_USER || '',
-      pass: process.env.EMAIL_HOST_PASSWORD || ''
+      user: process.env.EMAIL_HOST_USER,
+      pass: process.env.EMAIL_HOST_PASSWORD
     }
   });
 }
@@ -52,10 +59,16 @@ async function sendOtpEmail(email, otp, firstName) {
 }
 
 async function sendResetEmail(email, resetLink, firstName) {
+  console.log('\n' + '='.repeat(60));
+  console.log('🔑 [DEVELOPMENT] PASSWORD RESET LINK');
+  console.log(`📧 TO: ${email}`);
+  console.log(`🔗 LINK: ${resetLink}`);
+  console.log('='.repeat(60) + '\n');
   const emailUser = process.env.EMAIL_HOST_USER;
   if (!emailUser) {
     console.error('ERROR: EMAIL_HOST_USER not configured');
-    return false;
+    // In dev, we can still proceed if the link is logged
+    return process.env.NODE_ENV !== 'production';
   }
   const subject = 'Reset Your HealthTrack+ Password';
   const text = `Hi ${firstName || 'there'},\n\nClick the link below to reset your password. This link expires in 1 hour.\n\n${resetLink}\n\nIf you did not request a password reset, ignore this email.\n\nHealthTrack+ Team`;
@@ -74,53 +87,19 @@ async function sendResetEmail(email, resetLink, firstName) {
     return true;
   } catch (e) {
     console.error('Error sending reset email:', e.message);
-    return false;
+    // Allow local development to proceed if email fails but link is logged
+    return process.env.NODE_ENV !== 'production';
   }
 }
 
-async function ensureFirebaseUser(email, user) {
-  try {
-    return await firebaseAuth.getUserByEmail(email);
-  } catch (err) {
-    if (err.code !== 'auth/user-not-found') {
-      throw err;
-    }
-  }
-
-  const temporaryPassword = crypto.randomBytes(32).toString('hex');
-  const displayName = user.first_name
-    ? `${user.first_name} ${user.last_name || ''}`.trim()
-    : user.username;
-
-  return firebaseAuth.createUser({
-    email,
-    password: temporaryPassword,
-    displayName,
-    emailVerified: true
-  });
-}
-
-function toAppResetLink(firebaseLink, frontendUrl) {
-  try {
-    const url = new URL(firebaseLink);
-    const oobCode = url.searchParams.get('oobCode');
-    const apiKey = url.searchParams.get('apiKey');
-
-    if (!oobCode) {
-      return firebaseLink;
-    }
-
-    const appUrl = new URL('/reset-password', frontendUrl);
-    appUrl.searchParams.set('mode', 'resetPassword');
-    appUrl.searchParams.set('oobCode', oobCode);
-    if (apiKey) appUrl.searchParams.set('apiKey', apiKey);
-    return appUrl.toString();
-  } catch (err) {
-    return firebaseLink;
-  }
-}
+// Legacy Firebase helpers removed as we use custom auth now.
 
 async function sendVerificationLinkEmail(email, verificationLink, firstName) {
+  console.log('\n' + '='.repeat(60));
+  console.log('🚀 [DEVELOPMENT] EMAIL VERIFICATION LINK');
+  console.log(`📧 TO: ${email}`);
+  console.log(`🔗 LINK: ${verificationLink}`);
+  console.log('='.repeat(60) + '\n');
   const emailUser = process.env.EMAIL_HOST_USER;
   if (!emailUser) {
     console.error('ERROR: EMAIL_HOST_USER not configured');
@@ -143,7 +122,8 @@ async function sendVerificationLinkEmail(email, verificationLink, firstName) {
     return true;
   } catch (e) {
     console.error('Error sending verification email:', e.message);
-    return false;
+    // Allow local development to proceed if email fails but link is logged
+    return process.env.NODE_ENV !== 'production';
   }
 }
 
@@ -345,16 +325,18 @@ router.post('/forgot-password', async (req, res) => {
       'https://healthtrack.store';
     console.log('Forgot-password frontendUrl:', frontendUrl);
 
-    await ensureFirebaseUser(normalizedEmail, user);
+    const otp = generateOtp();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    await promisifyDbRun(
+      'INSERT INTO otps (email, otp_code, otp_type, expires_at) VALUES (?, ?, ?, ?)',
+      [normalizedEmail, otp, 'password_reset', expiresAt]
+    );
 
-    const firebaseResetLink = await firebaseAuth.generatePasswordResetLink(normalizedEmail, {
-      url: `${frontendUrl}/reset-password`,
-      handleCodeInApp: true
-    });
-    const resetLink = toAppResetLink(firebaseResetLink, frontendUrl);
+    const resetLink = `${frontendUrl}/reset-password?otp=${otp}&email=${encodeURIComponent(normalizedEmail)}`;
     const emailSent = await sendResetEmail(normalizedEmail, resetLink, user.first_name);
+    
     if (!emailSent) {
-      return res.status(500).json({ success: false, error: 'Failed to send reset email' });
+      return res.status(500).json({ success: false, error: 'Failed to send reset email. Please check server configuration.' });
     }
 
     res.json({ success: true });
@@ -364,14 +346,24 @@ router.post('/forgot-password', async (req, res) => {
   }
 });
 
-router.post('/update-password', async (req, res) => {
+router.post('/reset-password', async (req, res) => {
   try {
-    const { email, new_password } = req.body;
-    if (!email || !new_password) {
-      return res.status(400).json({ success: false, error: 'Email and new password are required' });
+    const { email, otp, new_password } = req.body;
+    if (!email || !otp || !new_password) {
+      return res.status(400).json({ success: false, error: 'Email, reset code, and new password are required' });
     }
 
-    const user = await promisifyDbGet('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
+    const normalizedEmail = email.toLowerCase();
+    const otpRecord = await promisifyDbGet(
+      'SELECT * FROM otps WHERE email = ? AND otp_code = ? AND otp_type = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 1',
+      [normalizedEmail, otp, 'password_reset', new Date().toISOString()]
+    );
+
+    if (!otpRecord) {
+      return res.status(400).json({ success: false, error: 'Invalid or expired reset link. Please request a new one.' });
+    }
+
+    const user = await promisifyDbGet('SELECT * FROM users WHERE email = ?', [normalizedEmail]);
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
@@ -379,9 +371,11 @@ router.post('/update-password', async (req, res) => {
     const hashedPassword = await bcrypt.hash(new_password, SALT_ROUNDS);
     await promisifyDbRun('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, user.id]);
 
+    await promisifyDbRun('DELETE FROM otps WHERE id = ?', [otpRecord.id]);
+
     res.json({ success: true, message: 'Password updated successfully' });
   } catch (e) {
-    console.error('Update password error:', e.message);
+    console.error('Reset password error:', e.message);
     res.status(400).json({ success: false, error: e.message });
   }
 });
@@ -448,81 +442,5 @@ router.post('/google-login', async (req, res) => {
   }
 });
 
-router.post('/verify-email-link', async (req, res) => {
-  try {
-    const { firebase_token, email, username, otp_type } = req.body;
-
-    let verifiedEmail = email;
-
-    if (firebase_token) {
-      const decodedToken = await firebaseAuth.verifyIdToken(firebase_token);
-      verifiedEmail = decodedToken.email || email;
-    } else {
-      return res.status(400).json({ success: false, error: 'Verification token is required' });
-    }
-
-    if (otp_type === 'register') {
-      const regData = pendingRegistrations.get(verifiedEmail) || pendingRegistrations.get(email);
-      if (!regData) {
-        return res.status(400).json({ success: false, error: 'Registration data expired. Please register again.' });
-      }
-
-      const hashedPassword = await bcrypt.hash(regData.password, SALT_ROUNDS);
-      const userType = ['doctor', 'provider'].includes(regData.role) ? 'provider' : 'patient';
-      const isApproved = regData.role === 'patient' ? 1 : 0;
-
-      const result = await promisifyDbRun(
-        `INSERT INTO users (username, email, password, first_name, last_name, user_type, is_approved, is_email_verified)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
-        [regData.username, verifiedEmail, hashedPassword, regData.first_name || '', regData.last_name || '', userType, isApproved]
-      );
-
-      const user = await promisifyDbGet('SELECT * FROM users WHERE id = ?', [result.id]);
-      pendingRegistrations.delete(verifiedEmail);
-      pendingRegistrations.delete(email);
-
-      if (regData.role === 'provider' || regData.role === 'doctor') {
-        await promisifyDbRun(
-          'INSERT INTO service_providers (user_id, provider_type, business_name) VALUES (?, ?, ?)',
-          [user.id, regData.role, regData.username]
-        );
-      }
-
-      const token = generateToken(user);
-      let userRole = user.user_type || 'patient';
-      if (user.is_superuser === 1) userRole = 'admin';
-
-      return res.json({
-        success: true,
-        token,
-        user: { id: user.id, username: user.username, email: user.email, role: userRole }
-      });
-    }
-
-    // Login verification
-    const user = await promisifyDbGet('SELECT * FROM users WHERE email = ?', [verifiedEmail]);
-    if (!user) {
-      return res.status(400).json({ success: false, error: 'User not found' });
-    }
-
-    const token = generateToken(user);
-    let userRole = 'patient';
-    if (user.is_superuser === 1 || user.user_type === 'admin') userRole = 'admin';
-    else if (user.user_type === 'provider' || user.user_type === 'doctor') {
-      const provider = await promisifyDbGet('SELECT * FROM service_providers WHERE user_id = ?', [user.id]);
-      if (user.user_type === 'doctor' || (provider && provider.provider_type === 'doctor')) userRole = 'doctor';
-      else userRole = 'provider';
-    }
-
-    res.json({
-      success: true,
-      token,
-      user: { id: user.id, username: user.username, email: user.email, role: userRole }
-    });
-  } catch (e) {
-    console.error('Email link verification error:', e.message);
-    res.status(400).json({ success: false, error: 'Email verification failed. Link may have expired.' });
-  }
-});
 
 module.exports = router;
